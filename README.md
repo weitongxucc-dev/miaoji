@@ -4,7 +4,7 @@
 
 ## 快速开始
 
-1. 双击 `release\秒记-Setup-1.3.4.exe` 安装。安装器默认装到 `D:\秒记`（目录页可以改），当前用户安装，不需要管理员权限。
+1. 双击 `release\秒记-Setup-1.3.4.exe` 安装，或在 [Releases](https://github.com/weitongxucc-dev/miaoji/releases/tag/v1.3.4) 下载 `miaoji-Setup-1.3.4.exe`。安装器默认装到 `D:\秒记`（目录页可以改），当前用户安装，不需要管理员权限。
 2. 第一次运行后，点桌面上的像素小机器人（或按 `Ctrl + Alt + M`），切到「设置」。
 3. 填入 **DeepSeek API Key**（在 https://platform.deepseek.com 申请），点「保存」→「测试连接」。
 4. 确认「Obsidian 生词本」路径，默认是：
