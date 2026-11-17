@@ -167,6 +167,32 @@
 .chart-day:hover .chart-bar, .chart-day:focus-visible .chart-bar { filter: brightness(1.08); }
 .chart-day:focus-visible .chart-bars { outline: 1px dashed var(--accent); outline-offset: 1px; }
 .chart-x { font-family: var(--font-mono); font-size: 9.5px; color: var(--faint); line-height: 1; }
+.chart-day.no-label .chart-x { visibility: hidden; }
+.chart-plot.dense { gap: 1px; }
+.chart-plot.dense .chart-bars { gap: 1px; }
+.chart-plot.dense .chart-bar { width: 100%; max-width: 6px; border-radius: 3px 3px 0 0; }
+
+/* 统计区间切换 */
+.range-switch {
+  display: flex;
+  gap: 4px;
+  margin: 2px 0 10px;
+}
+.range-switch button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+}
+.range-switch button:hover { color: var(--ink); border-color: var(--line-2); }
+.range-switch button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-wash, rgba(180, 82, 47, 0.08));
+}
 .chart-tip {
   position: absolute;
   bottom: 104px;

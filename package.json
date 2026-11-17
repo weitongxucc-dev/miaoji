@@ -1,6 +1,6 @@
 {
   "name": "miaoji",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "description": "秒记 — 桌面悬浮英文生词速记本，自动写入 Obsidian",
   "main": "main/main.js",

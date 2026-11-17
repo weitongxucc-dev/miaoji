@@ -38,7 +38,8 @@ contextBridge.exposeInMainWorld('api', {
   weeklyReport: () => invoke('weekly:report'),
   collectClipTerms: (key) => invoke('pipeline:terms', key),
   runAgent: (text) => invoke('agent:run', text),
-  statsOverview: () => invoke('stats:overview'),
+  statsOverview: (range) => invoke('stats:overview', range),
+  checkUpdate: () => invoke('update:check'),
 
   openNote: () => invoke('obsidian:open'),
   syncNote: () => invoke('obsidian:sync'),

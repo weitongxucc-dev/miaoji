@@ -28,7 +28,12 @@ const DEFAULTS = {
   clipWatch: false,
   clipWatchPaused: false,
   // 本地建议位：默认关闭，只根据本机复习数据生成，不含广告或画像
-  recommendSlot: false
+  recommendSlot: false,
+  // 自动周报：默认关闭；开启后每 7 天自动生成一次并写入 Obsidian
+  weeklyAuto: false,
+  weeklyLastAt: 0,
+  // 视频平台登录状态：默认关闭；只在抓取失败、重试时读取本机浏览器 cookie
+  videoCookies: ''
 };
 
 // 复习阶梯：每次「想起来了」推进一档（天数），「没想起」回到第一档
@@ -137,7 +142,10 @@ function publicConfig() {
     alwaysOnTop: conf.alwaysOnTop,
     clipWatch: Boolean(conf.clipWatch),
     clipWatchPaused: Boolean(conf.clipWatchPaused),
-    recommendSlot: Boolean(conf.recommendSlot)
+    recommendSlot: Boolean(conf.recommendSlot),
+    weeklyAuto: Boolean(conf.weeklyAuto),
+    weeklyLastAt: Number(conf.weeklyLastAt) || 0,
+    videoCookies: String(conf.videoCookies || '')
   };
 }
 

@@ -71,6 +71,7 @@ const { askDeepSeek, askFollowUp, testConnection, summarizeClip, minimalClip, cl
 const obsidian = require('./obsidian');
 const agent = require('./agent');
 const stats = require('./stats');
+const update = require('./update');
 
 const PET_W = 128;
 const PET_H = 152;
@@ -515,6 +516,7 @@ ipcMain.handle('app:init', () => {
     entries: store.loadEntries().entries,
     userData: store.DIR,
     installDir,
+    version: update.currentVersion(),
     shortcut: 'Ctrl + Alt + M',
     expanded,
     alwaysOnTop: conf.alwaysOnTop,
@@ -524,9 +526,13 @@ ipcMain.handle('app:init', () => {
 
 ipcMain.handle('config:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') return { ok: false, error: '参数错误' };
-  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'tracks', 'reviewDaily', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop', 'clipWatch', 'clipWatchPaused', 'recommendSlot'];
+  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'tracks', 'reviewDaily', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop', 'clipWatch', 'clipWatchPaused', 'recommendSlot', 'weeklyAuto', 'weeklyLastAt', 'videoCookies'];
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k];
+  if ('videoCookies' in clean) {
+    const browsers = ['edge', 'chrome', 'firefox', 'brave'];
+    clean.videoCookies = browsers.includes(clean.videoCookies) ? clean.videoCookies : '';
+  }
   const config = store.saveConfig(clean);
   if ('launchAtLogin' in clean) applyLaunchAtLogin(clean.launchAtLogin);
   if ('alwaysOnTop' in clean && win) win.setAlwaysOnTop(Boolean(clean.alwaysOnTop), 'floating');
@@ -595,7 +601,7 @@ ipcMain.handle('ai:query', async (_e, text, mode) => {
       fresh = await cleanNote(input, conf);
     } else if (/^https?:\/\/\S+$/i.test(input) && video.detect(input)) {
       // 视频链接 → yt-dlp 取标题/简介/字幕，全在本机完成
-      const v = await video.fetchVideo(input);
+      const v = await video.fetchVideo(input, { cookiesFromBrowser: conf.videoCookies });
       const original = v.transcript
         ? `【字幕 · ${v.transcriptSource || '视频字幕'}】\n\n${v.transcript}`
         : `【视频简介】\n\n${v.description || '（这个视频没有提供字幕和简介）'}`;
@@ -713,25 +719,64 @@ ipcMain.handle('quiz:generate', async (_e, keys) => {
   }
 });
 
+/** 自动周报：满 7 天且开着开关时，生成一次并写入 Obsidian */
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+let weeklyTimer = null;
+let weeklyBusy = false;
+
+async function maybeAutoWeekly() {
+  if (weeklyBusy) return;
+  const conf = store.loadConfig();
+  if (!conf.weeklyAuto) return;
+  if (!String(conf.apiKey || '').trim()) return; // 没有 Key 就没法生成
+  if (!conf.obsidianEnabled) return; // 自动周报的价值在写入笔记
+  const last = Number(conf.weeklyLastAt) || 0;
+  if (last && Date.now() - last < WEEK_MS) return;
+  weeklyBusy = true;
+  try {
+    const r = await generateWeekly();
+    if (r.ok) {
+      store.saveConfig({ weeklyLastAt: Date.now() });
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('ui:toast', {
+          text: r.obsidian && r.obsidian.ok ? '本周周报已写入 Obsidian' : '本周周报已生成（笔记未写入）',
+          type: 'info'
+        });
+      }
+    }
+    // 没有学习记录时不标记时间，明天再试
+  } catch {
+    /* 网络或 AI 失败时保持沉默，下次再试 */
+  } finally {
+    weeklyBusy = false;
+  }
+}
+
 ipcMain.handle('weekly:report', async () => {
   try {
-    const conf = store.loadConfig();
-    const data = agent.weekData();
-    if (!data.added.length && !data.reviewCount) {
-      return { ok: false, error: '这周还没有学习记录，先收几个词再来生成周报' };
-    }
-    const report = await weeklyReport(data, conf);
-    let write = { ok: true, skipped: true, path: '' };
-    try {
-      write = obsidian.writeWeekly(report, conf, data.period);
-    } catch (err) {
-      write = { ok: false, error: err && err.message ? err.message : String(err) };
-    }
-    return { ok: true, report, period: data.period, obsidian: write, stats: data };
+    const r = await generateWeekly();
+    return r.ok ? r : { ok: false, error: r.error };
   } catch (err) {
     return { ok: false, error: err && err.message ? err.message : String(err) };
   }
 });
+
+/** 生成并写入本周周报（页面按钮与自动周报共用） */
+async function generateWeekly() {
+  const conf = store.loadConfig();
+  const data = agent.weekData();
+  if (!data.added.length && !data.reviewCount) {
+    return { ok: false, error: '这周还没有学习记录，先收几个词再来生成周报' };
+  }
+  const report = await weeklyReport(data, conf);
+  let write = { ok: true, skipped: true, path: '' };
+  try {
+    write = obsidian.writeWeekly(report, conf, data.period);
+  } catch (err) {
+    write = { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+  return { ok: true, report, period: data.period, obsidian: write, stats: data };
+}
 
 ipcMain.handle('pipeline:terms', async (_e, key) => {
   const k = String(key || '').trim();
@@ -757,10 +802,10 @@ ipcMain.handle('agent:run', async (_e, text) => {
   }
 });
 
-ipcMain.handle('stats:overview', () => {
+ipcMain.handle('stats:overview', (_e, range) => {
   try {
     const conf = store.loadConfig();
-    const data = stats.overview();
+    const data = stats.overview(range);
     return {
       ok: true,
       ...data,
@@ -890,6 +935,8 @@ ipcMain.handle('obsidian:sync', () => {
   }
 });
 
+ipcMain.handle('update:check', () => update.check(true));
+
 ipcMain.handle('app:launch-at-login', (_e, enabled) => {
   const config = store.saveConfig({ launchAtLogin: Boolean(enabled) });
   const applied = applyLaunchAtLogin(Boolean(enabled));
@@ -950,6 +997,19 @@ app.whenReady().then(() => {
   let conf = store.loadConfig();
   if (conf.launchAtLogin) applyLaunchAtLogin(true);
 
+  // 静默检查新版本：每天最多一次，只请求 GitHub 公开 API，不发送任何本机数据
+  setTimeout(() => {
+    update.check(false).then((r) => {
+      if (r.ok && r.hasUpdate && win) {
+        win.webContents.send('ui:toast', { text: `发现新版本 ${r.latest} · 设置里可查看`, type: 'info' });
+      }
+    }).catch(() => {});
+  }, 10000);
+
+  // 自动周报：启动一分钟后检查一次，之后每 6 小时看一次是否满 7 天
+  setTimeout(() => { maybeAutoWeekly(); }, 60000);
+  weeklyTimer = setInterval(() => { maybeAutoWeekly(); }, 6 * 60 * 60 * 1000);
+
   screen.on('display-metrics-changed', () => {
     if (!win || expanded) return;
     petPos = clampPet(petPos);
@@ -974,4 +1034,5 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (clipTimer) clearInterval(clipTimer);
+  if (weeklyTimer) clearInterval(weeklyTimer);
 });

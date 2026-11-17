@@ -47,6 +47,8 @@ const el = {
   cfgClipPause: $('#cfgClipPause'),
   clipPauseRow: $('#clipPauseRow'),
   cfgRecommend: $('#cfgRecommend'),
+  cfgWeeklyAuto: $('#cfgWeeklyAuto'),
+  cfgVideoCookies: $('#cfgVideoCookies'),
   cfgKey: $('#cfgKey'),
   cfgBase: $('#cfgBase'),
   cfgModel: $('#cfgModel'),
@@ -67,6 +69,10 @@ const el = {
   btnDataDir: $('#btnDataDir'),
   dataDir: $('#dataDir'),
   installDir: $('#installDir'),
+  appVersion: $('#appVersion'),
+  btnCheckUpdate: $('#btnCheckUpdate'),
+  updateNote: $('#updateNote'),
+  btnOpenRelease: $('#btnOpenRelease'),
   modal: $('#modal'),
   modalCard: $('#modalCard'),
   toast: $('#toast')
@@ -77,6 +83,7 @@ const state = {
   entries: {},
   dataDir: '',
   installDir: '',
+  version: '',
   tab: 'jot',
   filter: 'hot',
   search: '',
@@ -102,6 +109,7 @@ const state = {
   statsData: null,
   weekly: null,
   weeklyBusy: false,
+  statsRange: '7',
   agentLog: [],
   agentBusy: false,
   clipWatchText: '',
@@ -1748,20 +1756,25 @@ function chartBarHeight(v, max) {
 
 function statsHTML(d) {
   const max = Math.max(1, ...d.days.map((x) => Math.max(x.added, x.reviewed)));
+  const rangeLabel = d.rangeLabel || '近 7 天';
   const legend = `
     <div class="chart-legend">
       <span><i class="chart-dot added"></i>新增</span>
       <span><i class="chart-dot reviewed"></i>复习</span>
     </div>`;
-  const days = d.days.map((x) => `
-    <div class="chart-day" tabindex="0" aria-label="${esc(x.date)} 新增 ${x.added}，复习 ${x.reviewed}">
+  const showEvery = d.days.length > 14 ? 5 : d.days.length > 7 ? 2 : 1;
+  const days = d.days.map((x, i) => {
+    const showLabel = showEvery === 1 || i === 0 || i === d.days.length - 1 || (d.days.length - 1 - i) % showEvery === 0;
+    return `
+    <div class="chart-day${showLabel ? '' : ' no-label'}" tabindex="0" aria-label="${esc(x.date)} 新增 ${x.added}，复习 ${x.reviewed}">
       <span class="chart-tip">${esc(x.date)} · 新增 ${x.added} · 复习 ${x.reviewed}</span>
       <div class="chart-bars">
         <span class="chart-bar added" style="height:${chartBarHeight(x.added, max)}%"></span>
         <span class="chart-bar reviewed" style="height:${chartBarHeight(x.reviewed, max)}%"></span>
       </div>
       <span class="chart-x">${esc(x.label)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   const tableRows = d.days.map((x) => `<tr><td>${esc(x.date)}</td><td>${x.added}</td><td>${x.reviewed}</td></tr>`).join('');
 
@@ -1776,7 +1789,7 @@ function statsHTML(d) {
 
   const weak = d.weak.length
     ? d.weak.map((w) => `<li><b>${esc(w.word)}</b><span>最近 ${w.times} 次没想起</span></li>`).join('')
-    : '<li class="stats-quiet">最近 7 天没有「没想起」的记录。</li>';
+    : `<li class="stats-quiet">${esc(rangeLabel)}没有「没想起」的记录。</li>`;
 
   const suggestions = d.recommendSlot
     ? `<div class="stat-block insight-block">
@@ -1793,18 +1806,23 @@ function statsHTML(d) {
     : `<p class="stats-foot">本地建议默认关闭。需要时在设置里开启；建议只根据你自己的复习数据生成，不联网、不含广告。</p>`;
 
   return `
+    <div class="range-switch" role="tablist" aria-label="统计区间">
+      <button data-range="7" class="${d.range === '7' ? 'active' : ''}" role="tab" aria-selected="${d.range === '7'}">7 天</button>
+      <button data-range="30" class="${d.range === '30' ? 'active' : ''}" role="tab" aria-selected="${d.range === '30'}">30 天</button>
+      <button data-range="month" class="${d.range === 'month' ? 'active' : ''}" role="tab" aria-selected="${d.range === 'month'}">本月</button>
+    </div>
     <div class="stats-hero">
       <div class="stat-tile"><b>${d.total}</b><span>收录</span></div>
       <div class="stat-tile"><b>${d.stats.reviewedWords}</b><span>复习过</span></div>
       <div class="stat-tile"><b>${d.stats.stable}</b><span>稳固</span></div>
       <div class="stat-tile${d.due ? ' is-due' : ''}"><b>${d.due}</b><span>到期</span></div>
     </div>
-    <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : d.streak ? `连续学习 <b>${d.streak}</b> 天` : '今天还没开始'} · 近 7 天新增 <b>${d.weekAdded}</b> · 复习 <b>${d.weekReviewed}</b> 次</p>
+    <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : d.streak ? `连续学习 <b>${d.streak}</b> 天` : '今天还没开始'} · ${esc(rangeLabel)}新增 <b>${d.rangeAdded}</b> · 复习 <b>${d.rangeReviewed}</b> 次</p>
 
     <div class="chart-card">
-      <div class="chart-head"><span class="chart-title">近 7 天</span>${legend}</div>
-      <div class="chart-plot">${days}</div>
-      ${!d.weekAdded && !d.weekReviewed ? '<p class="stats-note">这 7 天还没有新增或复习记录。</p>' : ''}
+      <div class="chart-head"><span class="chart-title">${esc(rangeLabel)}</span>${legend}</div>
+      <div class="chart-plot${d.days.length > 14 ? ' dense' : ''}">${days}</div>
+      ${!d.rangeAdded && !d.rangeReviewed ? `<p class="stats-note">${esc(rangeLabel)}还没有新增或复习记录。</p>` : ''}
       <details class="chart-table"><summary>看数字</summary>
         <table><thead><tr><th>日期</th><th>新增</th><th>复习</th></tr></thead><tbody>${tableRows}</tbody></table>
       </details>
@@ -1847,13 +1865,14 @@ function weeklyHTML(report) {
 async function renderStatsView() {
   if (!el.statsArea) return;
   try {
-    const r = await window.api.statsOverview();
+    const r = await window.api.statsOverview(state.statsRange);
     if (!r.ok) {
       el.statsArea.innerHTML = `<div class="review-empty"><div class="review-empty-title">读不到统计</div><div class="review-empty-sub">${esc(r.error || '未知错误')}</div></div>`;
       return;
     }
     state.statsData = r;
     el.statsArea.innerHTML = statsHTML(r);
+    if (el.statsWeek) el.statsWeek.textContent = r.rangeLabel || '近 7 天';
   } catch (err) {
     el.statsArea.innerHTML = `<div class="review-empty"><div class="review-empty-title">读不到统计</div><div class="review-empty-sub">${esc(err && err.message ? err.message : err)}</div></div>`;
   }
@@ -2381,11 +2400,14 @@ function fillSettings() {
   el.cfgClipPause.checked = Boolean(state.config.clipWatchPaused);
   el.clipPauseRow.classList.toggle('hidden', !state.config.clipWatch);
   el.cfgRecommend.checked = Boolean(state.config.recommendSlot);
+  el.cfgWeeklyAuto.checked = Boolean(state.config.weeklyAuto);
+  if (el.cfgVideoCookies) el.cfgVideoCookies.value = state.config.videoCookies || '';
   el.cfgReviewDaily.value = state.config.reviewDaily || 5;
   el.dataDir.textContent = state.dataDir || '—';
   el.dataDir.title = state.dataDir || '';
   el.installDir.textContent = state.installDir || '—';
   el.installDir.title = state.installDir || '';
+  if (el.appVersion) el.appVersion.textContent = state.version ? 'v' + state.version : '—';
   renderTrackList();
   refreshObsidianDetect();
 }
@@ -2692,6 +2714,13 @@ function bind() {
     el.statsArea.addEventListener('click', (e) => {
       const btn = e.target.closest('button');
       if (!btn) return;
+      if (btn.dataset.range) {
+        if (btn.dataset.range !== state.statsRange) {
+          state.statsRange = btn.dataset.range;
+          renderStatsView();
+        }
+        return;
+      }
       if (btn.dataset.weekly !== undefined) {
         generateWeekly();
         return;
@@ -3130,6 +3159,34 @@ function bind() {
     toast(on ? '已开启本地建议' : '已关闭本地建议');
   });
 
+  el.cfgWeeklyAuto.addEventListener('change', async () => {
+    const on = el.cfgWeeklyAuto.checked;
+    const r = await window.api.saveConfig({ weeklyAuto: on });
+    if (!r.ok) {
+      el.cfgWeeklyAuto.checked = !on;
+      toast(r.error || '保存失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    if (on && !state.config.obsidianEnabled) {
+      toast('已开启自动周报；需要同时开启「写入 Obsidian 笔记」才会执行', 'warn');
+    } else {
+      toast(on ? '已开启自动周报：每满 7 天生成一次' : '已关闭自动周报');
+    }
+  });
+
+  el.cfgVideoCookies.addEventListener('change', async () => {
+    const value = el.cfgVideoCookies.value;
+    const r = await window.api.saveConfig({ videoCookies: value });
+    if (!r.ok) {
+      el.cfgVideoCookies.value = state.config.videoCookies || '';
+      toast(r.error || '保存失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    toast(value ? '已开启：受限视频失败时会读取该浏览器的登录状态重试' : '已关闭：只抓取公开内容');
+  });
+
   el.btnChoose.addEventListener('click', async () => {
     const r = await window.api.chooseFile();
     if (r.canceled) return;
@@ -3200,6 +3257,30 @@ function bind() {
   el.btnDataDir.addEventListener('click', async () => {
     const r = await window.api.openDataDir();
     if (!r.ok) toast('打不开数据目录：' + r.error, 'warn');
+  });
+
+  let updateUrl = '';
+  el.btnCheckUpdate.addEventListener('click', async () => {
+    el.btnCheckUpdate.disabled = true;
+    el.updateNote.textContent = '正在查询最新版本…';
+    el.btnOpenRelease.classList.add('hidden');
+    const r = await window.api.checkUpdate();
+    el.btnCheckUpdate.disabled = false;
+    if (!r.ok) {
+      el.updateNote.textContent = '检查失败：' + (r.error || '未知错误');
+      return;
+    }
+    if (r.hasUpdate) {
+      updateUrl = r.url || '';
+      el.updateNote.textContent = `发现新版本 ${r.latest}（当前 v${r.current}）。下载安装包后直接覆盖安装即可，数据不会丢失。`;
+      el.btnOpenRelease.classList.toggle('hidden', !updateUrl);
+    } else {
+      updateUrl = '';
+      el.updateNote.textContent = `已是最新版本 v${r.current}。`;
+    }
+  });
+  el.btnOpenRelease.addEventListener('click', () => {
+    if (updateUrl) window.api.openUrl(updateUrl);
   });
 
   window.api.on('ui:expanded', () => setExpanded(true));
@@ -3314,6 +3395,7 @@ async function initData() {
     state.entries = data.entries || {};
     state.dataDir = data.userData || '';
     state.installDir = data.installDir || '';
+    state.version = data.version || '';
     state.expanded = Boolean(data.expanded);
     document.body.classList.toggle('expanded', state.expanded);
     renderStats();

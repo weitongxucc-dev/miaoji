@@ -21,16 +21,37 @@ function dayStart(offsetDays) {
   return d;
 }
 
-function overview() {
+function overview(range) {
   const conf = store.loadConfig();
   const all = store.listEntries();
   const state = store.reviewState(conf.reviewDaily);
   const tracks = conf.tracks || [];
 
+  // 统计区间：近 7 天 / 近 30 天 / 本月（从 1 号到今天）
+  const mode = ['7', '30', 'month'].includes(String(range)) ? String(range) : '7';
+  let start;
+  let rangeLabel;
+  if (mode === 'month') {
+    const now = new Date();
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    rangeLabel = '本月';
+  } else {
+    const n = mode === '30' ? 29 : 6;
+    start = dayStart(-n);
+    rangeLabel = mode === '30' ? '近 30 天' : '近 7 天';
+  }
+
   const days = [];
-  for (let i = 6; i >= 0; i -= 1) {
-    const d = dayStart(-i);
-    days.push({ date: dayKey(d), label: WEEKDAYS[d.getDay()], added: 0, reviewed: 0 });
+  const cursorDay = new Date(start);
+  cursorDay.setHours(0, 0, 0, 0);
+  const today = dayStart(0);
+  const spanDays = Math.round((today.getTime() - cursorDay.getTime()) / 86400000) + 1;
+  // 超过一周时不标星期，改标日期数字，避免挤在一起
+  const labelOf = (d) => (spanDays <= 7 ? WEEKDAYS[d.getDay()] : String(d.getDate()));
+  for (;;) {
+    days.push({ date: dayKey(cursorDay), label: labelOf(cursorDay), added: 0, reviewed: 0 });
+    if (cursorDay.getTime() >= today.getTime()) break;
+    cursorDay.setDate(cursorDay.getDate() + 1);
   }
   const byDate = new Map(days.map((d) => [d.date, d]));
 
@@ -80,12 +101,12 @@ function overview() {
   const kindCounts = {};
   for (const e of all) kindCounts[e.kind || 'word'] = (kindCounts[e.kind || 'word'] || 0) + 1;
 
-  const weekAdded = days.reduce((n, d) => n + d.added, 0);
-  const weekReviewed = days.reduce((n, d) => n + d.reviewed, 0);
+  const rangeAdded = days.reduce((n, d) => n + d.added, 0);
+  const rangeReviewed = days.reduce((n, d) => n + d.reviewed, 0);
 
-  // 最近 7 天里「没想起」次数最多的词
+  // 统计区间内「没想起」次数最多的词
   const forgotten = new Map();
-  const since = dayStart(-6).getTime();
+  const since = start.getTime();
   for (const e of all) {
     for (const r of Array.isArray(e.reviews) ? e.reviews : []) {
       if (!r || !r.at || r.grade !== 0) continue;
@@ -100,9 +121,11 @@ function overview() {
 
   return {
     days,
+    range: mode,
+    rangeLabel,
     streak,
-    weekAdded,
-    weekReviewed,
+    rangeAdded,
+    rangeReviewed,
     stats: state.stats,
     due: state.due.length,
     doneToday: state.doneToday,
@@ -140,8 +163,8 @@ function suggestions(data, conf) {
   if (!d.total) {
     list.push({ id: 'first', text: '还没有任何记录。复制一个想弄懂的词，点开机器人回车就行。', action: 'capture' });
   }
-  if (!d.weekReviewed && d.total > 0) {
-    list.push({ id: 'no-review', text: '这周还没有复习记录。收藏不会自动变成掌握，去回顾页翻几张卡。', action: 'review' });
+  if (!d.rangeReviewed && d.total > 0) {
+    list.push({ id: 'no-review', text: '这段时间还没有复习记录。收藏不会自动变成掌握，去回顾页翻几张卡。', action: 'review' });
   }
   return list.slice(0, 3);
 }

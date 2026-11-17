@@ -308,11 +308,32 @@
               <span class="switch-track"></span>
               <span class="switch-label">写入 Obsidian 笔记</span>
             </label>
+            <label class="switch">
+              <input type="checkbox" id="cfgWeeklyAuto">
+              <span class="switch-track"></span>
+              <span class="switch-label">每满 7 天自动生成周报</span>
+            </label>
+            <p class="help">默认关闭。开启后每满 7 天自动调用一次 DeepSeek，根据本机学习记录生成周报并写入「秒记周报.md」；只发送学习数据摘要，不发送原文。有笔记写入时才有意义。</p>
             <div class="obs-actions">
               <button id="btnOpenNote" class="link-btn sm">打开生词本</button>
               <button id="btnGetObsidian" class="link-btn sm">没有 Obsidian？去下载</button>
             </div>
             <p class="help">关掉后只保存在秒记本地，之后随时可以重新开启。</p>
+          </section>
+
+          <section class="settings-group">
+            <h3 class="settings-group-title">视频平台</h3>
+            <div class="field">
+              <label for="cfgVideoCookies">受限视频读取浏览器登录状态</label>
+              <select id="cfgVideoCookies">
+                <option value="">关闭（只用公开内容）</option>
+                <option value="edge">Edge 浏览器</option>
+                <option value="chrome">Chrome 浏览器</option>
+                <option value="firefox">Firefox 浏览器</option>
+                <option value="brave">Brave 浏览器</option>
+              </select>
+              <p class="help">默认关闭。抖音、TikTok、X 等平台很多视频要登录才能取字幕：选一个浏览器后，正常抓取失败时才会读取它的登录状态重试一次，只在本机使用、不上传。用该浏览器打开网站登录过即可；新版 Edge/Chrome 的 cookie 加密可能读不到，Firefox 兼容最好。</p>
+            </div>
           </section>
 
           <section class="settings-group">
@@ -362,6 +383,18 @@
               <div class="key-row"><kbd>1 – 4</kbd><span>AI 考官：选择答案</span></div>
               <div class="key-row"><kbd>Enter</kbd><span>AI 考官：答完后下一题</span></div>
             </div>
+          </section>
+
+          <section class="settings-group">
+            <h3 class="settings-group-title">版本</h3>
+            <div class="path-box">
+              <div class="path-line"><span class="path-key">当前</span><span id="appVersion" class="path-val">—</span><button id="btnCheckUpdate" class="path-open" title="向 GitHub 查询最新版本号">检查更新</button></div>
+              <p id="updateNote" class="path-note">每次启动最多查一次最新版本，只请求 GitHub 的公开版本信息，不发送任何本机数据。新版本需要你自己下载安装。</p>
+            </div>
+            <button id="btnOpenRelease" class="link-btn hidden">
+              <svg class="ico sm"><use href="#i-open"></use></svg>
+              去下载新版本
+            </button>
           </section>
 
           <p class="foot-note">数据仅存本机 · 等宽字体 Consolas</p>

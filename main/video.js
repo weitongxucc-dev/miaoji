@@ -222,17 +222,29 @@ function uploadDate(iso) {
 async function fetchVideo(rawUrl, opts = {}) {
   const det = detect(rawUrl);
   if (!det) throw new Error('不是支持的视频链接');
-  if (!ALLOW_LOCAL_FETCH && !process.env.MIAOJI_ALLOW_LOCAL_FETCH) {
+  if (!ALLOW_LOCAL_FETCH) {
     const { assertPublicHost } = require('./extract');
     await assertPublicHost(det.host);
   }
 
   const timeout = Math.max(20000, Number(opts.timeout) || 90000);
+  // 可选：读取本机浏览器登录状态（默认关闭，只在失败后重试时使用）
+  const browser = ['edge', 'chrome', 'firefox', 'brave'].includes(String(opts.cookiesFromBrowser || ''))
+    ? String(opts.cookiesFromBrowser)
+    : '';
+  const cookieArgs = browser ? ['--cookies-from-browser', browser] : [];
 
-  const raw = await runYtDlp(
-    ['--dump-single-json', '--skip-download', '--no-warnings', '--no-playlist', det.url],
-    timeout
-  );
+  const infoArgs = ['--dump-single-json', '--skip-download', '--no-warnings', '--no-playlist'];
+  let raw;
+  let usedCookies = false;
+  try {
+    raw = await runYtDlp([...infoArgs, det.url], timeout);
+  } catch (err) {
+    if (!browser) throw err;
+    // 第一次失败后才尝试带登录状态，减少对浏览器 cookie 的读取
+    raw = await runYtDlp([...infoArgs, ...cookieArgs, det.url], timeout);
+    usedCookies = true;
+  }
 
   let info;
   try {
@@ -260,6 +272,7 @@ async function fetchVideo(rawUrl, opts = {}) {
         '--write-subs', '--write-auto-subs',
         '--sub-langs', pick.lang,
         '--sub-format', 'json3/vtt/srt/best',
+        ...(usedCookies ? cookieArgs : []),
         '-o', path.join(dir, 'sub'),
         det.url
       ], timeout);
