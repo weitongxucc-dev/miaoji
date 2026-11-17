@@ -17,12 +17,17 @@ const DEFAULTS = {
   obsidianFile: '',
   obsidianEnabled: false,
   obsidianOnboarded: false,
+  tracks: [],
+  reviewDaily: 5,
   hotThreshold: 3,
   hotLimit: 15,
   ballPos: null,
   launchAtLogin: false,
   alwaysOnTop: true
 };
+
+// 复习阶梯：每次「想起来了」推进一档（天数），「没想起」回到第一档
+const REVIEW_INTERVALS = [1, 3, 7, 14, 30];
 
 let configCache = null;
 let entriesCache = null;
@@ -87,6 +92,18 @@ function saveConfig(patch) {
   conf.obsidianEnabled = Boolean(conf.obsidianEnabled) && Boolean(conf.obsidianFile);
   conf.obsidianOnboarded = Boolean(conf.obsidianOnboarded);
 
+  // 学习方向：[{ id, name, desc }]
+  if (!Array.isArray(conf.tracks)) conf.tracks = [];
+  conf.tracks = conf.tracks
+    .map((t, i) => ({
+      id: String(t && t.id ? t.id : 't' + (i + 1) + '_' + Date.now().toString(36)),
+      name: String(t && t.name ? t.name : '').trim().slice(0, 16),
+      desc: String(t && t.desc ? t.desc : '').trim().slice(0, 60)
+    }))
+    .filter((t) => t.name)
+    .slice(0, 12);
+  conf.reviewDaily = Math.max(1, Math.min(20, Math.round(Number(conf.reviewDaily) || DEFAULTS.reviewDaily)));
+
   configCache = conf;
 
   const out = { ...conf };
@@ -108,6 +125,8 @@ function publicConfig() {
     obsidianFile: conf.obsidianFile,
     obsidianEnabled: conf.obsidianEnabled,
     obsidianOnboarded: conf.obsidianOnboarded,
+    tracks: conf.tracks,
+    reviewDaily: conf.reviewDaily,
     hotThreshold: conf.hotThreshold,
     hotLimit: conf.hotLimit,
     launchAtLogin: conf.launchAtLogin,
@@ -122,6 +141,25 @@ function loadEntries() {
     if (file && typeof file.entries === 'object' && file.entries) {
       entriesCache.entries = file.entries;
     }
+    // 迁移：老词条补上复习字段（已掌握视为已毕业，其余按上次查询+1天排入复习）
+    let migrated = false;
+    for (const e of Object.values(entriesCache.entries)) {
+      if (e.stage === undefined || e.nextReviewAt === undefined) {
+        migrated = true;
+        e.reviews = Array.isArray(e.reviews) ? e.reviews : [];
+        if (e.mastered) {
+          e.graduated = true;
+          e.stage = null;
+          e.nextReviewAt = null;
+        } else {
+          e.stage = 0;
+          e.graduated = false;
+          const base = e.lastAt || new Date().toISOString();
+          e.nextReviewAt = new Date(new Date(base).getTime() + REVIEW_INTERVALS[0] * 86400000).toISOString();
+        }
+      }
+    }
+    if (migrated) persistEntries();
   }
   return entriesCache;
 }
@@ -150,17 +188,26 @@ function upsertEntry(fresh) {
   const key = keyFor(fresh.word || '');
   if (!key) throw new Error('词条为空，无法记录');
 
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
   const existing = data.entries[key];
 
   const entry = {
     ...fresh,
     key,
     count: existing ? (existing.count || 1) + 1 : 1,
-    firstAt: existing ? existing.firstAt : now,
-    lastAt: now,
-    mastered: existing ? false : false,
-    masteredAt: null,
+    firstAt: existing ? existing.firstAt : nowIso,
+    lastAt: nowIso,
+    mastered: existing ? Boolean(existing.mastered) : false,
+    masteredAt: existing ? (existing.masteredAt || null) : null,
+    // 复习调度：新词条收下次日到期；重查保留进度，未排期过的老词条排入队列
+    track: existing ? (existing.track || '') : String(fresh.track || ''),
+    stage: existing ? (existing.stage ?? 0) : 0,
+    graduated: existing ? Boolean(existing.graduated) : false,
+    nextReviewAt: existing && existing.nextReviewAt
+      ? existing.nextReviewAt
+      : new Date(now.getTime() + REVIEW_INTERVALS[0] * 86400000).toISOString(),
+    reviews: existing && Array.isArray(existing.reviews) ? existing.reviews.slice(-200) : [],
     // 重新查询时保留已经聊过的追问记录，只刷新词条内容
     thread: existing && Array.isArray(existing.thread) ? existing.thread.slice(-40) : [],
     followups: (fresh.followups && fresh.followups.length)
@@ -205,8 +252,87 @@ function setMastered(key, mastered) {
   if (!entry) throw new Error('找不到该词条');
   entry.mastered = Boolean(mastered);
   entry.masteredAt = mastered ? new Date().toISOString() : null;
+  // 标记掌握 = 移出复习队列；取消掌握则重新排入，明天到期
+  if (mastered) {
+    entry.graduated = true;
+    entry.nextReviewAt = null;
+  } else {
+    entry.graduated = false;
+    entry.nextReviewAt = new Date(Date.now() + REVIEW_INTERVALS[0] * 86400000).toISOString();
+  }
   persistEntries();
   return entry;
+}
+
+/**
+ * 提交一次复习自评。grade: 0=没想起 1=模糊 2=想起来了
+ */
+function recordReview(key, grade) {
+  const data = loadEntries();
+  const entry = data.entries[key];
+  if (!entry) throw new Error('找不到该词条');
+  const g = Math.max(0, Math.min(2, Math.round(Number(grade))));
+  const now = Date.now();
+  entry.reviews = Array.isArray(entry.reviews) ? entry.reviews : [];
+  entry.reviews.push({ at: new Date(now).toISOString(), grade: g });
+
+  if (g === 0) {
+    entry.stage = 0;
+    entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[0] * 86400000).toISOString();
+  } else if (g === 1) {
+    if (!Number.isInteger(entry.stage) || entry.stage < 0) entry.stage = 0;
+    entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[1] * 86400000).toISOString();
+  } else {
+    entry.stage = Number.isInteger(entry.stage) ? entry.stage + 1 : 1;
+    if (entry.stage >= REVIEW_INTERVALS.length) {
+      entry.graduated = true;
+      entry.nextReviewAt = null;
+    } else {
+      entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[entry.stage] * 86400000).toISOString();
+    }
+  }
+  // lastAt 保持「最近查词」的语义，复习时间只记在 reviews 里，避免把「今天 N 词」虚增
+  persistEntries();
+  return entry;
+}
+
+/**
+ * 词条的学习方向（track 存 id）
+ */
+function setEntryTrack(key, trackId) {
+  const data = loadEntries();
+  const entry = data.entries[key];
+  if (!entry) throw new Error('找不到该词条');
+  entry.track = String(trackId || '');
+  persistEntries();
+  return entry;
+}
+
+/**
+ * 复习总览：到期队列、今日已完成、诚实统计
+ */
+function reviewState(reviewDaily) {
+  const all = listEntries();
+  const now = Date.now();
+  const today = new Date().toDateString();
+  let doneToday = 0;
+  for (const e of all) {
+    for (const r of Array.isArray(e.reviews) ? e.reviews : []) {
+      if (r && r.at && new Date(r.at).toDateString() === today) doneToday += 1;
+    }
+  }
+  const due = all
+    .filter((e) => !e.mastered && !e.graduated && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now)
+    .sort((a, b) => new Date(a.nextReviewAt) - new Date(b.nextReviewAt));
+  const collected = all.length;
+  const reviewedWords = all.filter((e) => Array.isArray(e.reviews) && e.reviews.length > 0).length;
+  const stable = all.filter((e) => e.graduated || e.mastered).length;
+  return {
+    due: due.map((e) => e.key),
+    doneToday,
+    remaining: Math.max(0, (reviewDaily || 5) - doneToday),
+    stats: { collected, reviewedWords, stable }
+  };
 }
 
 function deleteEntry(key) {
@@ -230,6 +356,9 @@ module.exports = {
   upsertEntry,
   appendThread,
   setMastered,
+  recordReview,
+  setEntryTrack,
+  reviewState,
   deleteEntry,
   getEntry,
   keyFor,

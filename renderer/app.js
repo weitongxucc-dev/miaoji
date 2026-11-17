@@ -26,6 +26,15 @@ const el = {
   btnHot: $('#btnHot'),
   hotCount: $('#hotCount'),
   hotHeadCount: $('#hotHeadCount'),
+  btnReview: $('#btnReview'),
+  reviewDue: $('#reviewDue'),
+  reviewStats: $('#reviewStats'),
+  reviewArea: $('#reviewArea'),
+  trackList: $('#trackList'),
+  trackName: $('#trackName'),
+  btnAddTrack: $('#btnAddTrack'),
+  trackPresets: $('#trackPresets'),
+  cfgReviewDaily: $('#cfgReviewDaily'),
   cfgKey: $('#cfgKey'),
   cfgBase: $('#cfgBase'),
   cfgModel: $('#cfgModel'),
@@ -73,7 +82,9 @@ const state = {
   obsDetect: null,
   obsDetectAt: 0,
   onboardPending: false,
-  onboardShown: false
+  onboardShown: false,
+  reviewSession: null,
+  reviewGrades: []
 };
 
 /* ---------------- 工具 ---------------- */
@@ -641,7 +652,18 @@ function stats() {
   const all = Object.values(state.entries);
   const today = all.filter((e) => isToday(e.lastAt)).length;
   const hot = all.filter((e) => !e.mastered && (e.count || 1) >= (state.config?.hotThreshold || 3)).length;
-  return { total: all.length, today, hot };
+  const now = Date.now();
+  const due = all.filter((e) => !e.mastered && !e.graduated && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now);
+  const todayStr = new Date().toDateString();
+  let doneToday = 0;
+  for (const e of all) {
+    for (const r of Array.isArray(e.reviews) ? e.reviews : []) {
+      if (r && r.at && new Date(r.at).toDateString() === todayStr) doneToday += 1;
+    }
+  }
+  const reviewedWords = all.filter((e) => Array.isArray(e.reviews) && e.reviews.length > 0).length;
+  const stable = all.filter((e) => e.graduated || e.mastered).length;
+  return { total: all.length, today, hot, due, doneToday, reviewedWords, stable };
 }
 
 function renderStats() {
@@ -652,8 +674,17 @@ function renderStats() {
     : s.today === 0
       ? `今天还没查词 · 累计 ${s.total}`
       : `今天 ${s.today} · 累计 ${s.total}`;
+  // 回顾页头部的差距统计跟全站状态走，复习打完分立即反映
+  if (el.reviewStats) {
+    el.reviewStats.innerHTML = `已收 <b>${s.total}</b> · 复习过 <b>${s.reviewedWords}</b> · 稳固 <b>${s.stable}</b>`;
+  }
 
-  if (s.today > 0) {
+  // 气泡：有到期复习时优先提醒「回顾 N」，机器人成为复习信使
+  const dueLeft = Math.max(0, s.due.length - Math.min(s.doneToday, s.due.length));
+  if (dueLeft > 0 && s.due.length > 0) {
+    el.petCount.textContent = `回顾 ${Math.min(dueLeft, state.config.reviewDaily || 5)}`;
+    el.bubble.classList.remove('hidden');
+  } else if (s.today > 0) {
     el.petCount.textContent = `今日 ${s.today}`;
     el.bubble.classList.remove('hidden');
   } else if (s.total === 0) {
@@ -661,6 +692,13 @@ function renderStats() {
     el.bubble.classList.remove('hidden');
   } else {
     el.bubble.classList.add('hidden');
+  }
+
+  if (s.due.length > 0) {
+    el.reviewDue.textContent = String(s.due.length);
+    el.reviewDue.classList.remove('hidden');
+  } else {
+    el.reviewDue.classList.add('hidden');
   }
 
   if (s.hot > 0) {
@@ -893,10 +931,17 @@ function followHTML(e) {
 
 function dossierHTML(e) {
   const isSentence = e.kind === 'sentence';
+  const tracks = state.config?.tracks || [];
   const meta = [];
   if (e.phonetic) meta.push(`<span class="phon">${esc(e.phonetic)}</span>`);
   if (e.pos) meta.push(`<span class="pos-tag">${esc(e.pos)}</span>`);
   if (e.mastered) meta.push('<span class="pos-tag">已掌握</span>');
+  if (tracks.length) {
+    const options = ['<option value="">方向</option>']
+      .concat(tracks.map((t) => `<option value="${esc(t.id)}"${e.track === t.id ? ' selected' : ''}>${esc(t.name)}</option>`))
+      .join('');
+    meta.push(`<select class="track-select" data-track-select title="学习方向：AI 会按它解释这个词">${options}</select>`);
+  }
   meta.push(`<button class="speak-btn" data-speak="${esc(e.word)}" title="朗读">${icon('i-speaker')}</button>`);
 
   const zones = [
@@ -1110,6 +1155,194 @@ function renderHot() {
 function renderAll() {
   renderStats();
   if (state.tab === 'hot') renderHot();
+  if (state.tab === 'review') renderReview();
+}
+
+/* ---------------- 回顾（提取式复习） ---------------- */
+
+const REVIEW_GRADES = [
+  { g: 0, label: '没想起', key: '1', hint: '明天再来' },
+  { g: 1, label: '模糊', key: '2', hint: '3 天后' },
+  { g: 2, label: '想起来了', key: '3', hint: '进入下一阶段' }
+];
+
+function trackNameOf(trackId) {
+  const t = (state.config?.tracks || []).find((x) => x.id === trackId);
+  return t ? t.name : '';
+}
+
+function dueEntries() {
+  const now = Date.now();
+  return Object.values(state.entries)
+    .filter((e) => !e.mastered && !e.graduated && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now)
+    .sort((a, b) => new Date(a.nextReviewAt) - new Date(b.nextReviewAt));
+}
+
+function renderReview() {
+  if (!state.config || !el.reviewArea) return;
+  const s = stats();
+
+  // 进行中的会话优先渲染
+  if (state.reviewSession) return renderReviewCard();
+
+  const remaining = Math.max(0, (state.config.reviewDaily || 5) - s.doneToday);
+  const due = dueEntries();
+  const list = due.slice(0, remaining);
+
+  if (!list.length) {
+    const next = Object.values(state.entries)
+      .filter((e) => !e.mastered && !e.graduated && e.nextReviewAt)
+      .sort((a, b) => new Date(a.nextReviewAt) - new Date(b.nextReviewAt))[0];
+    const done = s.doneToday > 0;
+    el.reviewArea.innerHTML = `<div class="review-empty">
+      <img src="assets/robot-${done ? 'happy' : 'idle'}.png" alt="">
+      <div class="review-empty-title">${done ? '今天的回顾完成了' : '今天没有到期的词'}</div>
+      <div class="review-empty-sub">${
+        next
+          ? `下一个到期：${esc(truncate(next.word, 24))} · ${fmtShort(next.nextReviewAt)}`
+          : '查一个词，明天它就会回到这里等你'
+      }<br>记住的秘诀不是多看，是先想再翻。</div>
+    </div>`;
+    return;
+  }
+
+  el.reviewArea.innerHTML = `<div class="review-done">
+    <img src="assets/robot-idle.png" alt="">
+    <div class="review-empty-title">${list.length} 个词到期</div>
+    <div class="review-empty-sub">按今天的额度，这次回顾 ${list.length} 个。<br>先想它的意思，再翻面。</div>
+    <button class="review-flip-btn" data-review-start>开始回顾</button>
+  </div>`;
+}
+
+function startReviewSession() {
+  const s = stats();
+  const remaining = Math.max(0, (state.config.reviewDaily || 5) - s.doneToday);
+  const list = dueEntries().slice(0, remaining).map((e) => e.key);
+  if (!list.length) {
+    renderReview();
+    return;
+  }
+  state.reviewSession = { ids: list, idx: 0, flipped: false, grades: [] };
+  renderReviewCard();
+}
+
+function renderReviewCard() {
+  const session = state.reviewSession;
+  if (!session || !el.reviewArea) return;
+
+  if (session.idx >= session.ids.length) return renderReviewSummary();
+
+  const entry = state.entries[session.ids[session.idx]];
+  if (!entry) {
+    session.idx += 1;
+    return renderReviewCard();
+  }
+
+  const track = trackNameOf(entry.track);
+  const trackChip = track ? `<span class="pos-tag">${esc(track)}</span>` : '';
+  const progress = `回顾 · ${session.idx + 1}/${session.ids.length}`;
+
+  if (!session.flipped) {
+    el.reviewArea.innerHTML = `<div class="review-card">
+      <div class="review-progress">${progress}</div>
+      <div class="review-term">${esc(truncate(entry.word, 60))}</div>
+      <div class="review-meta">${trackChip}</div>
+      <div class="review-hint">先想一下它的意思，再翻面。<br>按 <kbd>空格</kbd> 或点下面的按钮。</div>
+      <button class="review-flip-btn" data-review-flip>显示答案</button>
+    </div>`;
+    return;
+  }
+
+  const meaning = plainText(entry.meaning_zh || entry.sentence_translation || '');
+  const memory = plainText(entry.memory || '');
+  el.reviewArea.innerHTML = `<div class="review-card">
+    <div class="review-progress">${progress}</div>
+    <div class="review-term">${esc(truncate(entry.word, 60))}</div>
+    <div class="review-meta">${trackChip}</div>
+    <div class="review-answer">
+      <div class="review-meaning">${esc(truncate(meaning, 120))}</div>
+      ${memory ? `<div class="review-extra"><span class="lbl">// 为什么重要</span><br>${esc(truncate(memory, 90))}</div>` : ''}
+      <div class="grade-row">${REVIEW_GRADES.map((g) => `
+        <button class="grade-btn g${g.g}" data-review-grade="${g.g}">
+          ${g.label}<small>${g.key} · ${g.hint}</small>
+        </button>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+async function submitReviewGrade(grade) {
+  const session = state.reviewSession;
+  if (!session) return;
+  const key = session.ids[session.idx];
+  const entry = state.entries[key];
+  if (!entry) return;
+
+  session.grades.push({ word: entry.word, grade });
+  state.reviewGrades = session.grades;
+
+  const r = await window.api.submitReview(key, grade);
+  if (r.ok) state.entries[key] = r.entry;
+
+  session.idx += 1;
+  session.flipped = false;
+  if (session.idx >= session.ids.length) renderReviewSummary();
+  else renderReviewCard();
+  renderStats();
+}
+
+function renderReviewSummary() {
+  const session = state.reviewSession;
+  const grades = session ? session.grades : [];
+  const good = grades.filter((g) => g.grade === 2).length;
+  const weak = grades.filter((g) => g.grade === 0).length;
+  state.reviewSession = null;
+
+  if (!grades.length) {
+    renderReview();
+    return;
+  }
+  if (el.reviewArea) {
+    el.reviewArea.innerHTML = `<div class="review-done">
+      <img src="assets/robot-happy.png" alt="">
+      <div class="review-done-title">回顾完成 · ${grades.length} 词</div>
+      <div class="review-done-sub">想起来了 ${good} · 需要加强 ${weak + grades.filter((g) => g.grade === 1).length}<br>
+        ${weak ? '没想起的词明天会再回来。' : '明天的它还会来找你。'}</div>
+    </div>`;
+  }
+  renderStats();
+  setPetMode('happy');
+  setTimeout(() => setPetMode('idle'), 900);
+}
+
+function bindReview() {
+  el.reviewArea.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.dataset.reviewStart !== undefined) {
+      startReviewSession();
+    } else if (btn.dataset.reviewFlip !== undefined) {
+      if (state.reviewSession) {
+        state.reviewSession.flipped = true;
+        renderReviewCard();
+      }
+    } else if (btn.dataset.reviewGrade !== undefined) {
+      submitReviewGrade(Number(btn.dataset.reviewGrade));
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (state.tab !== 'review' || !state.reviewSession) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.key === ' ' && !state.reviewSession.flipped) {
+      e.preventDefault();
+      state.reviewSession.flipped = true;
+      renderReviewCard();
+    } else if (state.reviewSession.flipped && ['1', '2', '3'].includes(e.key)) {
+      e.preventDefault();
+      submitReviewGrade(Number(e.key) - 1);
+    }
+  });
 }
 
 /* ---------------- 查询 / 追问 ---------------- */
@@ -1384,6 +1617,7 @@ function switchTab(tab) {
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + tab));
   document.body.classList.toggle('result-view', tab === 'jot' && Boolean(state.lastResult) && !state.busy);
   if (tab === 'hot') renderHot();
+  if (tab === 'review') renderReview();
   if (tab === 'settings') fillSettings();
   if (tab === 'jot' && !state.lastResult) setTimeout(() => el.input.focus(), 40);
   if (tab !== 'jot') stopEmptyRobot();
@@ -1526,11 +1760,103 @@ function fillSettings() {
   el.cfgThreshold.value = state.config.hotThreshold || 3;
   el.cfgLimit.value = state.config.hotLimit || 15;
   el.cfgLaunch.checked = Boolean(state.config.launchAtLogin);
+  el.cfgReviewDaily.value = state.config.reviewDaily || 5;
   el.dataDir.textContent = state.dataDir || '—';
   el.dataDir.title = state.dataDir || '';
   el.installDir.textContent = state.installDir || '—';
   el.installDir.title = state.installDir || '';
+  renderTrackList();
   refreshObsidianDetect();
+}
+
+/* ---------------- 学习方向管理 ---------------- */
+
+function renderTrackList() {
+  if (!el.trackList) return;
+  const tracks = state.config?.tracks || [];
+  const counts = {};
+  for (const e of Object.values(state.entries)) {
+    if (e.track) counts[e.track] = (counts[e.track] || 0) + 1;
+  }
+  if (!tracks.length) {
+    el.trackList.innerHTML = '<div class="review-empty-sub" style="padding:2px 0;">还没有方向。查词后 AI 会自动建议归属。</div>';
+    return;
+  }
+  el.trackList.innerHTML = tracks.map((t) => `
+    <div class="track-row">
+      <div>
+        <div class="t-name">${esc(t.name)}</div>
+        ${counts[t.id] ? `<div class="t-desc">${counts[t.id]} 个词条</div>` : ''}
+      </div>
+      <span class="t-count">${counts[t.id] ? counts[t.id] + ' 词' : ''}</span>
+      <button class="t-del" data-track-del="${esc(t.id)}">移除</button>
+    </div>`).join('');
+}
+
+async function saveTracks(tracks, msg) {
+  const r = await window.api.saveConfig({ tracks });
+  if (!r.ok) {
+    toast(r.error || '保存失败', 'warn');
+    return;
+  }
+  state.config = r.config;
+  renderTrackList();
+  if (state.lastResult && state.lastResult.entry) renderResult();
+  if (msg) toast(msg);
+}
+
+function bindTracks() {
+  if (!el.trackList) return;
+
+  el.btnAddTrack.addEventListener('click', async () => {
+    const name = el.trackName.value.trim();
+    if (!name) {
+      toast('先写个方向名');
+      el.trackName.focus();
+      return;
+    }
+    const tracks = state.config?.tracks || [];
+    if (tracks.some((t) => t.name === name)) {
+      toast('已经有这个方向了', 'warn');
+      return;
+    }
+    if (tracks.length >= 12) {
+      toast('方向最多 12 个', 'warn');
+      return;
+    }
+    tracks.push({ id: 't' + Date.now().toString(36), name, desc: '' });
+    el.trackName.value = '';
+    await saveTracks(tracks, `已添加方向「${name}」`);
+  });
+
+  el.trackName.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      el.btnAddTrack.click();
+    }
+  });
+
+  el.trackList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-track-del]');
+    if (!btn) return;
+    const id = btn.dataset.trackDel;
+    const tracks = (state.config?.tracks || []).filter((t) => t.id !== id);
+    // 方向被移除后，属于它的词条回到「无方向」
+    for (const entry of Object.values(state.entries)) {
+      if (entry.track === id) {
+        entry.track = '';
+        window.api.setEntryTrack(entry.key, '');
+      }
+    }
+    await saveTracks(tracks, '已移除方向，相关词条回到无方向');
+  });
+
+  el.trackPresets.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-preset]');
+    if (!btn) return;
+    el.trackName.value = btn.dataset.preset;
+    el.btnAddTrack.click();
+  });
 }
 
 async function saveSettings(showFeedback = true) {
@@ -1540,6 +1866,7 @@ async function saveSettings(showFeedback = true) {
     model: el.cfgModel.value.trim(),
     hotThreshold: Number(el.cfgThreshold.value) || 3,
     hotLimit: Number(el.cfgLimit.value) || 15,
+    reviewDaily: Number(el.cfgReviewDaily.value) || 5,
     launchAtLogin: el.cfgLaunch.checked
   };
   const r = await window.api.saveConfig(patch);
@@ -1706,6 +2033,8 @@ function bindBrand() {
 function bind() {
   bindPetDrag();
   bindBrand();
+  bindReview();
+  bindTracks();
 
   el.pet.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -1855,6 +2184,23 @@ function bind() {
     if (!form) return;
     e.preventDefault();
     sendFollowUp($('#followInput', form)?.value);
+  });
+
+  // 词头的方向下拉：一键改归属，笔记同步更新
+  el.result.addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-track-select]');
+    if (!sel) return;
+    const entry = state.lastResult && state.lastResult.entry;
+    if (!entry) return;
+    const r = await window.api.setEntryTrack(entry.key, sel.value);
+    if (!r.ok) {
+      toast(r.error || '设置失败', 'warn');
+      return;
+    }
+    state.entries[entry.key] = r.entry;
+    if (state.lastResult) state.lastResult.entry = r.entry;
+    renderResult();
+    toast('已更新学习方向');
   });
 
   el.result.addEventListener('keydown', (e) => {

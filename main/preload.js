@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('api', {
 
   master: (key, mastered) => invoke('entry:master', key, mastered),
   remove: (key) => invoke('entry:delete', key),
+  submitReview: (key, grade) => invoke('review:submit', key, grade),
+  setEntryTrack: (key, trackId) => invoke('entry:set-track', key, trackId),
 
   openNote: () => invoke('obsidian:open'),
   syncNote: () => invoke('obsidian:sync'),

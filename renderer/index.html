@@ -100,6 +100,10 @@
           <svg class="ico"><use href="#i-flame"></use></svg>
           <span id="hotCount" class="nav-badge hidden">0</span>
         </button>
+        <button class="icon-btn nav-icon" data-tab="review" id="btnReview" title="回顾（复习到期的词）" aria-label="回顾">
+          <svg class="ico"><use href="#i-repeat"></use></svg>
+          <span id="reviewDue" class="nav-badge accent hidden">0</span>
+        </button>
         <button class="icon-btn nav-icon" data-tab="settings" title="设置" aria-label="设置">
           <svg class="ico"><use href="#i-gear"></use></svg>
         </button>
@@ -149,6 +153,16 @@
           </div>
         </div>
         <div id="hotList" class="hot-list"></div>
+      </section>
+
+      <section id="view-review" class="view">
+        <div class="view-head">
+          <div>
+            <h2 class="view-title">回顾</h2>
+          </div>
+          <span id="reviewStats" class="review-stats-line">—</span>
+        </div>
+        <div id="reviewArea" class="review-area"></div>
       </section>
 
       <section id="view-settings" class="view">
@@ -201,6 +215,28 @@
           </section>
 
           <section class="settings-group">
+            <h3 class="settings-group-title">学习方向</h3>
+            <div id="trackList" class="track-list"></div>
+            <div class="track-add">
+              <input id="trackName" class="track-input" type="text" placeholder="加一个方向，如：供应链" maxlength="16" spellcheck="false">
+              <button id="btnAddTrack" class="btn ghost sm">添加</button>
+            </div>
+            <div class="track-presets" id="trackPresets">
+              <span class="track-presets-label">快速添加：</span>
+              <button class="track-preset" data-preset="编程">编程</button>
+              <button class="track-preset" data-preset="供应链">供应链</button>
+              <button class="track-preset" data-preset="网络安全">网络安全</button>
+              <button class="track-preset" data-preset="产品">产品</button>
+            </div>
+            <div class="field">
+              <label for="cfgReviewDaily">每日复习量（词）</label>
+              <input id="cfgReviewDaily" type="number" min="1" max="20">
+              <p class="help">每天最多回顾多少个到期的词。宁少勿多，连续比强度重要。</p>
+            </div>
+            <p class="help">AI 会按方向解释词条（同一个词在不同领域含义不同），新查的词自动归入最贴切的方向。</p>
+          </section>
+
+          <section class="settings-group">
             <h3 class="settings-group-title">笔记</h3>
             <div class="obs-status-row">
               <span id="obsStatus" class="obs-status">正在检测 Obsidian…</span>
@@ -249,6 +285,8 @@
               <div class="key-row"><kbd>Shift + Enter</kbd><span>输入框内换行</span></div>
               <div class="key-row"><kbd>Esc</kbd><span>收起面板</span></div>
               <div class="key-row"><kbd>Ctrl + Alt + M</kbd><span>全局唤出 / 收起</span></div>
+              <div class="key-row"><kbd>空格</kbd><span>回顾中：翻面看答案</span></div>
+              <div class="key-row"><kbd>1 / 2 / 3</kbd><span>回顾中：没想起 / 模糊 / 想起来了</span></div>
             </div>
           </section>
 

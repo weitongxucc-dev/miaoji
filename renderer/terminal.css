@@ -1,5 +1,5 @@
 /* ============================================================
-   秒记 v1.3.6 · 纸面终端皮肤
+   秒记 v1.4.0 · 纸面终端皮肤
    暖米白纸面 / 等宽字 / 橙色提示 / 像素小机器人
    加载在 styles.css 之后，只覆盖视觉，不改布局结构。
    ============================================================ */
@@ -181,6 +181,194 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
   line-height: 14px;
 }
 .nav-icon.active .nav-badge { display: none; }
+
+/* ---------- 回顾页 ---------- */
+.review-stats-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  letter-spacing: 0.2px;
+}
+.review-stats-line b { color: var(--accent-deep); font-weight: 700; }
+.review-area { display: flex; flex-direction: column; }
+
+.review-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  padding: 22px 20px;
+}
+.review-progress {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  letter-spacing: 0.5px;
+}
+.review-progress::before { content: "› "; color: var(--accent); }
+.review-term {
+  margin: 18px 0 4px;
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.3;
+  word-break: break-word;
+}
+.review-hint {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--placeholder);
+  line-height: 1.7;
+}
+.review-hint kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.review-flip-btn {
+  margin-top: 26px;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.review-flip-btn:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
+.review-answer { animation: review-reveal 200ms ease-out; }
+@keyframes review-reveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.review-meaning {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.review-extra {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.review-extra .lbl { color: var(--accent-deep); font-size: 11px; }
+.grade-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 24px; }
+.grade-btn {
+  padding: 9px 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.grade-btn small { display: block; margin-top: 1px; font-size: 9.5px; color: var(--faint); }
+.grade-btn:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.grade-btn.g0:hover { border-color: var(--danger); background: var(--danger-soft); }
+.grade-btn.g2:hover { border-color: var(--green); background: #E8F0E2; }
+.review-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 46px 20px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  text-align: center;
+}
+.review-done img { width: 96px; image-rendering: pixelated; }
+.review-done-title {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.review-done-sub { font-family: var(--font-mono); font-size: 12px; color: var(--muted); line-height: 1.7; }
+.review-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 20px;
+  border: 1px dashed var(--line-strong);
+  background: var(--surface);
+  text-align: center;
+}
+.review-empty img { width: 88px; image-rendering: pixelated; }
+.review-empty-title { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--ink); }
+.review-empty-sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); line-height: 1.8; }
+
+/* ---------- 词头的方向选择 ---------- */
+.track-select {
+  max-width: 110px;
+  padding: 3px 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--sunken);
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.track-select:focus { border-color: var(--accent); outline: none; }
+
+/* ---------- 设置：学习方向 ---------- */
+.track-list { display: grid; gap: 5px; margin: 2px 0 9px; }
+.track-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  background: var(--field);
+}
+.track-row .t-name { font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
+.track-row .t-name::before { content: "# "; color: var(--accent); }
+.track-row .t-desc {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-row .t-del {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 2px 7px;
+}
+.track-row .t-del:hover { border-color: var(--danger); background: var(--danger-soft); }
+.track-row .t-count { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); }
+.track-add { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 9px; }
+.track-input {
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.track-input:focus { border-color: var(--accent); outline: none; }
+.track-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.track-presets-label { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+.track-preset {
+  padding: 2px 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--sunken);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.track-preset:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
 
 #btnOpenNote { margin-left: 4px; position: relative; }
 #btnOpenNote::before {

@@ -3,6 +3,35 @@
 const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也研究词源与技术史。服务对象是中文母语的英语学习者。
 用户会给你一个英文单词、短语或句子。请先判断类型，然后只输出一个 JSON 对象（不要 markdown 代码块、不要任何解释）。
 
+如果是领域术语、概念、行业缩写（中文或英文，如「幂等性」「VMI」「安全左移」），输出：
+{
+  "kind": "term",
+  "word": "术语原样（保留中英文原样）",
+  "phonetic": "",
+  "pos": "术语",
+  "meaning_zh": "准确、简洁的定义（2 句以内）",
+  "definition_en": "对应的英文说法，没有就给空字符串",
+  "examples": [
+    { "en": "该术语在这个领域的典型用法例句（可为中文语境的英文表达）", "zh": "中文翻译" }
+  ],
+  "synonyms": ["相近术语或说法，最多 4 个"],
+  "collocations": ["这个术语常见的搭配场景，最多 4 个"],
+  "memory": "一句话说清楚为什么它重要：不搞懂它会在什么场合吃亏",
+  "note": "最常见的误解或易混概念，没有就给空字符串",
+  "origin": {
+    "root": "概念出处：谁提出的、源自哪个领域、何时流行；不确定就写「资料有限」",
+    "first_use": "",
+    "story": "3 到 5 句中文，讲清楚这个概念的来龙去脉：解决什么问题、如何演变、现状",
+    "timeline": [
+      { "when": "时期", "what": "当时的含义或标志性事件" }
+    ],
+    "scenes": ["在这个领域里，它通常出现在什么场景", "和外行理解相比，内行怎么用"],
+    "why": "值得注意的辨析：容易和什么概念混淆、关键差别是什么",
+    "related": ["周边概念，最多 4 个"]
+  },
+  "followups": ["围绕这个术语的短问题", "围绕用法的短问题", "围绕相关概念的短问题"]
+}
+
 如果是单词或短语，输出：
 {
   "kind": "word",
@@ -60,7 +89,8 @@ const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也
 3. 技术术语的 origin.story 要讲清楚它在专业语境里怎么被使用，而不只是普通词义。
 4. followups 给 3 条，每条不超过 24 个字，必须是用户真的会想问的问题。
 5. 正文里可以用 **加粗** 标出关键对比或易混点，每个字段最多 1 处；不要用标题、表格或代码块。
-6. 只输出 JSON。所有中文内容使用简体中文。`;
+6. 术语（kind 为 term）的解释要贴合用户声明或最贴近的学习方向。
+7. 只输出 JSON。所有中文内容使用简体中文。`;
 
 const FOLLOWUP_PROMPT = `你是「秒记」的英语词典助教。用户正在追问一个已经记录过的词条或句子。
 你会收到词条上下文和之前的追问记录。请基于这些内容回答当前问题。
@@ -192,7 +222,7 @@ function normalizeOrigin(raw) {
 function normalizeEntry(raw, inputText) {
   if (!raw || typeof raw !== 'object') throw new Error('AI 返回的内容格式不正确，请重试');
 
-  const kind = raw.kind === 'sentence' ? 'sentence' : 'word';
+  const kind = raw.kind === 'sentence' ? 'sentence' : raw.kind === 'term' ? 'term' : 'word';
   const word = cleanStr(raw.word) || String(inputText || '').trim();
 
   const examples = cleanArr(raw.examples)
@@ -229,10 +259,14 @@ function normalizeEntry(raw, inputText) {
     key_points: strList(raw.key_points, 6),
     key_words: keyWords,
     origin: normalizeOrigin(raw.origin),
-    followups: strList(raw.followups, 4)
+    followups: strList(raw.followups, 4),
+    track: cleanStr(raw.track)
   };
 
   if (!entry.word) throw new Error('AI 没有识别出词条内容，请重试');
+  if (kind === 'term' && !entry.meaning_zh) {
+    throw new Error('AI 没有返回术语定义，请重试');
+  }
   if (kind === 'word' && !entry.meaning_zh) {
     throw new Error('AI 没有返回释义，请重试');
   }
@@ -242,14 +276,29 @@ function normalizeEntry(raw, inputText) {
   return entry;
 }
 
+/**
+ * 把用户的学习方向注入提示词：AI 按「track」字段建议归属，并贴合领域语境解释。
+ */
+function withTrackContext(trackNames) {
+  const names = (Array.isArray(trackNames) ? trackNames : []).filter(Boolean);
+  if (!names.length) return '';
+  return [
+    '',
+    `用户正在学习这些方向：${names.join('、')}。`,
+    `判断这个输入最贴近哪个方向，在输出里加一个字段 "track"，值为上面的方向名称之一；都不贴切就给空字符串。`,
+    `解释内容请优先贴合该领域的语境和用法；同一个词在不同领域含义不同（如 port 在网络里是端口、物流里是港口），必须按所属领域解释。`
+  ].join('\n');
+}
+
 async function askDeepSeek(text, config) {
+  const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
   if (process.env.MIAOJI_MOCK === '1') {
     await new Promise((r) => setTimeout(r, 600));
     return mockEntry(text);
   }
   const content = await callChat(
     [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT + withTrackContext(trackNames) },
       { role: 'user', content: String(text).trim() }
     ],
     config,
@@ -371,7 +420,9 @@ function mockOrigin(isSentence) {
 
 function mockEntry(input) {
   const text = String(input).trim();
+  const hasChinese = /[一-鿿]/.test(text);
   const isSentence = text.split(/\s+/).filter(Boolean).length > 3;
+  if (hasChinese && !isSentence) return mockTermEntry(text);
   if (isSentence) {
     return {
       kind: 'sentence',
@@ -412,6 +463,37 @@ function mockEntry(input) {
     note: '正式书面语常用，口语里说 everywhere 更自然。这是测试数据。',
     origin: mockOrigin(false),
     followups: ['它和 pervasive 有什么区别？', 'ubiquitous computing 具体指什么？', '口语里怎么替换它？']
+  };
+}
+
+function mockTermEntry(text) {
+  return {
+    kind: 'term',
+    word: text,
+    phonetic: '',
+    pos: '术语',
+    meaning_zh: '（测试术语）同一个操作执行多次，结果与执行一次相同。测试数据用来检查术语卡的排版。',
+    definition_en: 'idempotency',
+    examples: [
+      { en: 'Retry mechanisms rely on idempotent requests to avoid duplicate charges.', zh: '重试机制依赖幂等请求来避免重复扣款。' }
+    ],
+    synonyms: ['幂等性', '重试安全'],
+    collocations: ['幂等请求', '幂等接口', '保证幂等'],
+    memory: '不搞懂它，写重试逻辑就可能重复扣款或重复建单。',
+    note: '最常见误解：把幂等当成「返回相同」——其实是「副作用相同」。测试数据。',
+    origin: {
+      root: '来自数学/计算机科学（测试数据）',
+      first_use: '',
+      story: '这个概念最早来自数学：f(f(x)) = f(x)。被引入分布式系统后，用来描述网络重试场景下的安全性。今天它是接口设计的基本要求，测试数据用来检查术语卡排版。',
+      timeline: [
+        { when: '数学', what: 'f(f(x)) = f(x) 的性质' },
+        { when: '分布式时代', what: '成为接口重试设计的核心要求' }
+      ],
+      scenes: ['在接口设计里，支付、下单类接口必须保证幂等', '外行常以为幂等是「返回一样」，内行强调的是「副作用一样」'],
+      why: '容易和「缓存」「去重」混淆：幂等是副作用层面的性质，不是结果层面的。',
+      related: ['重试', '分布式事务', '去重', '接口设计']
+    },
+    followups: ['幂等和去重的区别是什么？', '怎么把接口设计成幂等的？', '哪些场景必须幂等？']
   };
 }
 

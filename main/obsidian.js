@@ -162,7 +162,14 @@ function threadLines(entry) {
   return lines;
 }
 
-function entryBlock(entry) {
+function trackLabel(config, trackId) {
+  const id = String(trackId || '');
+  if (!id) return '';
+  const t = ((config && config.tracks) || []).find((x) => x && x.id === id);
+  return t ? t.name : '';
+}
+
+function entryBlock(entry, trackName) {
   const m = markers(entry.key);
   const lines = [];
   const isSentence = entry.kind === 'sentence';
@@ -177,12 +184,15 @@ function entryBlock(entry) {
 
   const metaBits = [];
   if (isSentence) metaBits.push('💬 句子');
+  if (entry.kind === 'term') metaBits.push('🧩 术语');
+  if (trackName) metaBits.push(`🎯 ${trackName}`);
   if (entry.phonetic) metaBits.push(`\`${entry.phonetic}\``);
-  if (entry.pos) metaBits.push(`*${entry.pos}*`);
+  if (entry.kind !== 'term' && entry.pos) metaBits.push(`*${entry.pos}*`);
   metaBits.push(`🔥 **${entry.count} 次**`);
   metaBits.push(`最近 ${fmt(entry.lastAt)}`);
   metaBits.push(`首查 ${fmt(entry.firstAt, false)}`);
   if (entry.mastered) metaBits.push('✅ 已掌握');
+  if (entry.graduated) metaBits.push('🏅 复习毕业');
   lines.push(metaBits.join(' · '));
   lines.push('');
 
@@ -320,7 +330,7 @@ function upsert(entry, entries, config) {
   let doc = ensureHotMarkers(rawDoc);
   doc = writeHot(doc, entries, config);
 
-  const block = entryBlock(entry);
+  const block = entryBlock(entry, trackLabel(config, entry.track));
   const replaced = replaceEntry(doc, entry, block);
   if (replaced !== null) {
     doc = replaced;
@@ -359,7 +369,7 @@ function syncAll(entries, config) {
   doc = writeHot(doc, entries, config);
   const sorted = [...entries].sort((a, b) => new Date(a.firstAt || 0) - new Date(b.firstAt || 0));
   if (sorted.length) {
-    doc = doc.replace(/\s+$/, '') + '\n\n' + sorted.map(entryBlock).join('\n\n') + '\n';
+    doc = doc.replace(/\s+$/, '') + '\n\n' + sorted.map((e) => entryBlock(e, trackLabel(config, e.track))).join('\n\n') + '\n';
   }
   writeDoc(file, doc);
   return { ok: true, path: file, created: true };

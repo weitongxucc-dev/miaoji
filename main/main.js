@@ -403,7 +403,7 @@ ipcMain.handle('app:init', () => {
 
 ipcMain.handle('config:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') return { ok: false, error: '参数错误' };
-  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop'];
+  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'tracks', 'reviewDaily', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop'];
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k];
   const config = store.saveConfig(clean);
@@ -464,6 +464,11 @@ ipcMain.handle('ai:query', async (_e, text) => {
   try {
     const conf = store.loadConfig();
     const fresh = await askDeepSeek(input, conf);
+    // AI 建议的学习方向（名称）映射成 id
+    if (fresh.track) {
+      const hit = (conf.tracks || []).find((t) => t.name === fresh.track);
+      fresh.track = hit ? hit.id : '';
+    }
     const { entry, isNew } = store.upsertEntry(fresh);
     const all = store.listEntries();
     let write;
@@ -473,6 +478,42 @@ ipcMain.handle('ai:query', async (_e, text) => {
       write = { ok: false, error: err && err.message ? err.message : String(err) };
     }
     return { ok: true, entry, isNew, count: entry.count, obsidian: write };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('review:submit', (_e, key, grade) => {
+  try {
+    const entry = store.recordReview(String(key), grade);
+    const conf = store.loadConfig();
+    const all = store.listEntries();
+    let write = { ok: true, skipped: true };
+    try {
+      write = obsidian.update(entry, all, conf);
+    } catch (err) {
+      write = { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+    return { ok: true, entry, obsidian: write };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('entry:set-track', (_e, key, trackId) => {
+  try {
+    const entry = store.setEntryTrack(String(key), String(trackId || ''));
+    const conf = store.loadConfig();
+    const all = store.listEntries();
+    let write = { ok: true, skipped: true };
+    if (conf.obsidianEnabled) {
+      try {
+        write = obsidian.update(entry, all, conf);
+      } catch (err) {
+        write = { ok: false, error: err && err.message ? err.message : String(err) };
+      }
+    }
+    return { ok: true, entry, obsidian: write };
   } catch (err) {
     return { ok: false, error: err && err.message ? err.message : String(err) };
   }
