@@ -66,7 +66,8 @@ if (!ENV_DATA_DIR && DATA_DIR !== OLD_USER_DATA) {
 }
 
 const store = require('./store');
-const { askDeepSeek, askFollowUp, testConnection, summarizeClip, cleanNote, lookupZh, makeQuiz, weeklyReport } = require('./ai');
+const video = require('./video');
+const { askDeepSeek, askFollowUp, testConnection, summarizeClip, minimalClip, cleanNote, lookupZh, makeQuiz, weeklyReport } = require('./ai');
 const obsidian = require('./obsidian');
 const agent = require('./agent');
 const stats = require('./stats');
@@ -592,6 +593,28 @@ ipcMain.handle('ai:query', async (_e, text, mode) => {
       fresh = await lookupZh(input, conf);
     } else if (m === 'note') {
       fresh = await cleanNote(input, conf);
+    } else if (/^https?:\/\/\S+$/i.test(input) && video.detect(input)) {
+      // 视频链接 → yt-dlp 取标题/简介/字幕，全在本机完成
+      const v = await video.fetchVideo(input);
+      const original = v.transcript
+        ? `【字幕 · ${v.transcriptSource || '视频字幕'}】\n\n${v.transcript}`
+        : `【视频简介】\n\n${v.description || '（这个视频没有提供字幕和简介）'}`;
+      const page = {
+        url: v.url,
+        title: v.title || `${v.provider}视频`,
+        site: v.site,
+        publishedAt: v.publishedAt,
+        text: original,
+        video: {
+          provider: v.provider,
+          author: v.author,
+          durationSeconds: v.duration,
+          transcriptSource: v.transcriptSource
+        }
+      };
+      const richEnough = v.transcript || (v.description && v.description.length >= 40);
+      fresh = richEnough ? await summarizeClip(page, conf) : minimalClip(page);
+      explicitKey = store.clipKeyFor(v.url);
     } else if (/^https?:\/\/\S+$/i.test(input)) {
       // 链接 → 抓正文、摘要、术语标注，原文一起保存
       const page = await extract.extractFromUrl(input);

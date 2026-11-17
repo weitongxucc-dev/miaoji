@@ -1058,6 +1058,16 @@ function dossierHTML(e) {
   const tracks = state.config?.tracks || [];
   const meta = [];
   if (kindTag) meta.push(`<span class="pos-tag">${kindTag}</span>`);
+  if (e.source && e.source.type === 'video') {
+    const bits = ['🎬'];
+    if (e.source.author) bits.push(esc(e.source.author));
+    if (e.source.durationSeconds) {
+      const n = Math.round(Number(e.source.durationSeconds) || 0);
+      bits.push(`${Math.floor(n / 60)}分${String(n % 60).padStart(2, '0')}秒`);
+    }
+    if (e.source.transcriptSource) bits.push(esc(e.source.transcriptSource));
+    meta.push(`<span class="src-tag">${bits.join(' · ')}</span>`);
+  }
   if (e.source && e.source.site && isClip) meta.push(`<span class="src-tag">${esc(e.source.site)}</span>`);
   if (e.phonetic) meta.push(`<span class="phon">${esc(e.phonetic)}</span>`);
   if (e.pos) meta.push(`<span class="pos-tag">${esc(e.pos)}</span>`);

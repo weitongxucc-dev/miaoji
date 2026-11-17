@@ -1,6 +1,6 @@
 {
   "name": "miaoji",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "秒记 — 桌面悬浮英文生词速记本，自动写入 Obsidian",
   "main": "main/main.js",
@@ -24,7 +24,12 @@
       "main/**/*",
       "renderer/**/*",
       "assets/**/*",
+      "node_modules/@mozilla/readability/**/*",
+      "bin/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "bin/**/*"
     ],
     "asar": true,
     "win": {
@@ -50,5 +55,8 @@
       "artifactName": "秒记-Setup-${version}.${ext}",
       "deleteAppDataOnUninstall": false
     }
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0"
   }
 }

@@ -188,9 +188,12 @@ function entryBlock(entry, trackName) {
   const metaBits = [];
   if (isSentence) metaBits.push('💬 句子');
   if (entry.kind === 'term') metaBits.push('🧩 术语');
-  if (isClip) metaBits.push('💾 剪藏');
+  if (isClip && entry.source && entry.source.type === 'video') metaBits.push('🎬 视频');
+  if (isClip && (!entry.source || entry.source.type !== 'video')) metaBits.push('💾 剪藏');
   if (isNote) metaBits.push('✍️ 闪念');
   if (isLookup) metaBits.push('🔎 反查');
+  if (isClip && entry.source && entry.source.type === 'video' && entry.source.author) metaBits.push(entry.source.author);
+  if (isClip && entry.source && entry.source.type === 'video' && entry.source.transcriptSource) metaBits.push(entry.source.transcriptSource);
   if (isClip && entry.source && entry.source.site) metaBits.push(entry.source.site);
   if (trackName) metaBits.push(`🎯 ${trackName}`);
   if (entry.phonetic) metaBits.push(`\`${entry.phonetic}\``);

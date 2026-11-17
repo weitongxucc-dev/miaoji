@@ -383,6 +383,50 @@ function normalizeTerms(raw) {
     .slice(0, 12);
 }
 
+/** clip 条目的 source：普通网页 vs 视频（带作者/时长/字幕来源） */
+function clipSource(page) {
+  const capturedAt = new Date().toISOString();
+  if (page.video) {
+    const v = page.video;
+    return {
+      type: 'video',
+      url: page.url,
+      title: page.title,
+      site: page.site,
+      capturedAt,
+      provider: cleanStr(v.provider).slice(0, 20),
+      author: cleanStr(v.author).slice(0, 80),
+      durationSeconds: Math.max(0, Math.round(Number(v.durationSeconds) || 0)),
+      transcriptSource: cleanStr(v.transcriptSource).slice(0, 20)
+    };
+  }
+  return { type: 'url', url: page.url, title: page.title, site: page.site, capturedAt };
+}
+
+/** 没有字幕也没有简介的视频：不做 AI，建最小条目（诚实降级） */
+function minimalClip(page) {
+  return {
+    kind: 'clip',
+    word: page.title || page.site || '视频',
+    summary: '',
+    key_points: [],
+    terms: [],
+    note: '',
+    followups: [],
+    track: '',
+    source: clipSource(page),
+    original: page.text,
+    phonetic: '',
+    pos: '',
+    meaning_zh: '',
+    examples: [],
+    synonyms: [],
+    collocations: [],
+    memory: '',
+    origin: normalizeOrigin(null)
+  };
+}
+
 function normalizeClip(raw, page) {
   if (!raw || typeof raw !== 'object') throw new Error('AI 返回的内容格式不正确，请重试');
   return {
@@ -394,13 +438,7 @@ function normalizeClip(raw, page) {
     note: cleanStr(raw.note),
     followups: strList(raw.followups, 4),
     track: cleanStr(raw.track),
-    source: {
-      type: 'url',
-      url: page.url,
-      title: page.title,
-      site: page.site,
-      capturedAt: new Date().toISOString()
-    },
+    source: clipSource(page),
     original: page.text,
     phonetic: '',
     pos: '',
@@ -512,6 +550,7 @@ async function summarizeClip(page, config) {
   const material = [
     `标题：${page.title}`,
     `站点：${page.site}`,
+    page.video && page.video.author ? `作者：${page.video.author}` : '',
     page.publishedAt ? `发布时间：${page.publishedAt}` : '',
     '正文：',
     String(page.text || '').slice(0, 8000)
@@ -860,13 +899,7 @@ function mockClip(page) {
     note: '（测试数据）最大的风险不是重试本身，而是把「不重复」寄托在客户端不重试上。',
     followups: ['幂等键应该由谁生成？', '重试风暴怎么限流？', '至少一次和恰好一次怎么选？'],
     track: '',
-    source: {
-      type: 'url',
-      url: page.url,
-      title: page.title,
-      site: page.site,
-      capturedAt: new Date().toISOString()
-    },
+    source: clipSource(page),
     original: page.text,
     phonetic: '',
     pos: '',
@@ -977,6 +1010,7 @@ module.exports = {
   askDeepSeek,
   askFollowUp,
   summarizeClip,
+  minimalClip,
   cleanNote,
   lookupZh,
   makeQuiz,

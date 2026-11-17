@@ -198,13 +198,20 @@ function clipKeyFor(url) {
 
 function sanitizeSource(raw) {
   const s = raw && typeof raw === 'object' ? raw : {};
-  return {
-    type: ['url', 'selection', 'clipboard', 'manual'].includes(s.type) ? s.type : 'manual',
+  const out = {
+    type: ['url', 'video', 'selection', 'clipboard', 'manual'].includes(s.type) ? s.type : 'manual',
     url: String(s.url || '').slice(0, 2000),
     title: String(s.title || '').slice(0, 200),
     site: String(s.site || '').slice(0, 120),
     capturedAt: String(s.capturedAt || '').slice(0, 40)
   };
+  if (out.type === 'video') {
+    out.provider = String(s.provider || '').slice(0, 20);
+    out.author = String(s.author || '').slice(0, 80);
+    out.durationSeconds = Math.max(0, Math.round(Number(s.durationSeconds) || 0));
+    out.transcriptSource = String(s.transcriptSource || '').slice(0, 20);
+  }
+  return out;
 }
 
 function sanitizeTerms(raw) {

@@ -10,6 +10,9 @@ const https = require('https');
 const zlib = require('zlib');
 const dns = require('dns');
 const net = require('net');
+const fs = require('fs');
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
@@ -18,6 +21,177 @@ const DEFAULT_TIMEOUT = 15000;
 const ALLOW_LOCAL_FETCH = process.env.MIAOJI_ALLOW_LOCAL_FETCH === '1';
 
 const BLOCK_TAGS = 'p|div|section|article|main|li|ul|ol|h1|h2|h3|h4|h5|h6|blockquote|pre|tr|table|figure|figcaption';
+
+/* ---------------- Readability 渲染解析（主路径） ----------------
+ * 借 Electron 自带的 Chromium：隐藏窗口加载页面（含 JS 动态渲染），
+ * 再在页面里跑 Mozilla Readability（Firefox 阅读模式同款算法）取正文。
+ * 全部本地执行，不经过任何第三方服务。 */
+
+let readabilitySource = null;
+function loadReadability() {
+  if (readabilitySource !== null) return readabilitySource;
+  try {
+    readabilitySource = fs.readFileSync(require.resolve('@mozilla/readability/Readability.js'), 'utf8');
+  } catch {
+    readabilitySource = '';
+  }
+  return readabilitySource;
+}
+
+function buildReaderScript(rdSource) {
+  return `(function() {
+  var module = { exports: {} };
+${rdSource}
+  var RD = module.exports;
+  try {
+    var doc = document.cloneNode(true);
+    var article = new RD(doc).parse();
+    if (!article || !article.textContent || String(article.textContent).trim().length < 40) {
+      return { ok: false };
+    }
+    var holder = document.createElement('div');
+    holder.innerHTML = article.content || '';
+    var paras = [];
+    holder.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,blockquote,pre').forEach(function(el) {
+      var t = String(el.textContent || '').replace(/[ \\t\\r\\n]+/g, ' ').trim();
+      if (t) paras.push(t);
+    });
+    var text = paras.join('\\n\\n');
+    if (!text || text.length < 40) text = String(article.textContent || '').trim();
+    var metaPub = document.querySelector('meta[property="article:published_time"], meta[name="pubdate"], meta[name="date"], time[datetime]');
+    var pub = metaPub ? (metaPub.getAttribute('content') || metaPub.getAttribute('datetime') || '') : (article.publishedTime || '');
+    return {
+      ok: true,
+      title: String(article.title || document.title || ''),
+      byline: String(article.byline || ''),
+      siteName: String(article.siteName || ''),
+      text: text,
+      publishedAt: String(pub)
+    };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+})()`;
+}
+
+function looksLocalHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  if (!h || h === 'localhost' || h.endsWith('.local')) return true;
+  if (net.isIPv4(h)) return isPrivateIp(h);
+  return false;
+}
+
+async function renderExtract(rawUrl, opts = {}) {
+  let electron;
+  try {
+    electron = require('electron');
+  } catch {
+    return null;
+  }
+  if (!electron || !electron.BrowserWindow) return null; // 非 Electron 环境，走静态兜底
+  const rdSource = loadReadability();
+  if (!rdSource) return null;
+
+  let startUrl = String(rawUrl || '').trim();
+  try {
+    const u = new URL(startUrl);
+    if (!/^https?:$/.test(u.protocol)) return null;
+    if (!ALLOW_LOCAL_FETCH) await assertPublicHost(u.hostname);
+  } catch (err) {
+    throw err;
+  }
+
+  const { BrowserWindow } = electron;
+  const timeoutMs = Math.max(10000, Number(opts.timeout) || 20000);
+  const win = new BrowserWindow({
+    show: false,
+    width: 1280,
+    height: 1600,
+    skipTaskbar: true,
+    webPreferences: {
+      partition: 'miaoji-extract', // 内存 session，不落盘、不带走 cookie
+      sandbox: true,
+      nodeIntegration: false,
+      contextIsolation: true,
+      backgroundThrottling: false,
+      images: false,
+      javascript: true
+    }
+  });
+
+  try {
+    win.setMenuBarVisibility(false);
+    const wc = win.webContents;
+    wc.setUserAgent(UA);
+
+    // 只放行主文档 / 脚本 / XHR / fetch，其余（图片、字体、样式、iframe、媒体）拦截
+    wc.session.webRequest.onBeforeRequest((details, callback) => {
+      const t = details.resourceType;
+      const allow = t === 'mainFrame' || t === 'script' || t === 'xhr' || t === 'fetch';
+      callback({ cancel: !allow });
+    });
+    wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+    let navCount = 0;
+    wc.on('will-navigate', (e, url) => {
+      navCount += 1;
+      let host = '';
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        host = '';
+      }
+      if (navCount > 5 || !/^https?:/i.test(url) || (!ALLOW_LOCAL_FETCH && looksLocalHost(host))) {
+        e.preventDefault();
+      }
+    });
+
+    return await new Promise((resolve) => {
+      let settled = false;
+      const finish = (v) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(v);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+
+      const attempt = (retryAfterMs) => {
+        wc.executeJavaScript(buildReaderScript(rdSource), true)
+          .then((r) => {
+            if (settled) return;
+            if (r && r.ok && r.text && r.text.length >= 80) {
+              finish(r);
+              return;
+            }
+            if (retryAfterMs > 0) {
+              // 页面可能还在懒加载，稍等再试一次
+              setTimeout(() => {
+                if (!settled) attempt(0);
+              }, retryAfterMs);
+            } else {
+              finish(null);
+            }
+          })
+          .catch(() => finish(null));
+      };
+
+      wc.on('did-finish-load', () => {
+        setTimeout(() => {
+          if (!settled) attempt(2500);
+        }, 700);
+      });
+      wc.loadURL(startUrl, { userAgent: UA }).catch(() => {
+        /* 加载失败留给超时/静态兜底 */
+      });
+    });
+  } finally {
+    try {
+      win.destroy();
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 function isPrivateIp(ip) {
   if (!ip) return true;
@@ -57,7 +231,7 @@ function requestOnce(url, opts) {
       url,
       {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+          'User-Agent': UA,
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
           'Accept-Encoding': 'gzip, deflate, br'
@@ -210,9 +384,48 @@ async function fetchHtml(rawUrl, opts = {}) {
 
 /**
  * 抓取并清洗一个网页。
- * 返回 { ok, url, title, site, publishedAt, excerpt, text }
+ * 主路径：隐藏窗口渲染 + Readability（能处理 JS 动态渲染的页面）；
+ * 兜底：零依赖静态抓取（服务器直出 HTML 的页面）。
+ * 返回 { ok, url, title, site, publishedAt, excerpt, text, extractor }
  */
 async function extractFromUrl(rawUrl, opts = {}) {
+  // 先试渲染解析
+  let rendered = null;
+  let renderError = null;
+  try {
+    rendered = await renderExtract(rawUrl, opts);
+  } catch (err) {
+    // 本机/局域网地址这类安全错误直接抛，不再走静态兜底
+    renderError = err;
+    if (err && /局域网|本机/.test(String(err.message))) throw err;
+  }
+  if (rendered && rendered.text && rendered.text.length >= 40) {
+    let text = String(rendered.text).trim();
+    const title = String(rendered.title || '').trim().slice(0, 160);
+    // h1 往往和标题重复，去掉开头那一行，避免原文里出现两遍标题
+    if (title) {
+      const firstLine = text.split(/\n/)[0].trim();
+      if (firstLine && (firstLine === title || firstLine.startsWith(title))) {
+        text = text.slice(firstLine.length).trim();
+      }
+    }
+    if (text && text.length >= 40) {
+      const u = new URL(String(rawUrl).trim());
+      return {
+        ok: true,
+        url: u.toString(),
+        title: title || u.hostname,
+        site: u.hostname.replace(/^www\./, ''),
+        publishedAt: String(rendered.publishedAt || ''),
+        excerpt: text.slice(0, 120),
+        text: text.slice(0, 200000),
+        extractor: 'render'
+      };
+    }
+    // 渲染结果太薄，落到静态兜底
+  }
+
+  // 静态兜底
   const { url, html } = await fetchHtml(rawUrl, opts);
   const meta = extractMeta(html);
   let text = extractTextFromHtml(pickContentHtml(html));
@@ -232,8 +445,9 @@ async function extractFromUrl(rawUrl, opts = {}) {
     site: u.hostname.replace(/^www\./, ''),
     publishedAt: meta.publishedAt,
     excerpt: text.slice(0, 120),
-    text: text.slice(0, 200000)
+    text: text.slice(0, 200000),
+    extractor: 'static'
   };
 }
 
-module.exports = { extractFromUrl, extractTextFromHtml, extractMeta, isPrivateIp };
+module.exports = { extractFromUrl, extractTextFromHtml, extractMeta, fetchHtml, assertPublicHost, isPrivateIp };
