@@ -333,12 +333,28 @@ function recordReview(key, grade) {
   entry.reviews.push({ at: new Date(now).toISOString(), grade: g });
 
   if (g === 0) {
+    entry.fuzzyStreak = 0;
     entry.stage = 0;
     entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[0] * 86400000).toISOString();
   } else if (g === 1) {
+    // 「模糊」不再永远停在 3 天：间隔随阶段增长；连续两次模糊算半次进步，
+    // 避免只点「模糊」的词永远不毕业。
     if (!Number.isInteger(entry.stage) || entry.stage < 0) entry.stage = 0;
-    entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[1] * 86400000).toISOString();
+    entry.fuzzyStreak = (Number(entry.fuzzyStreak) || 0) + 1;
+    if (entry.fuzzyStreak % 2 === 0) {
+      entry.stage += 1;
+      if (entry.stage >= REVIEW_INTERVALS.length) {
+        entry.graduated = true;
+        entry.nextReviewAt = null;
+      } else {
+        entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[entry.stage] * 86400000).toISOString();
+      }
+    } else {
+      const days = Math.max(REVIEW_INTERVALS[1], REVIEW_INTERVALS[entry.stage] || 0);
+      entry.nextReviewAt = new Date(now + days * 86400000).toISOString();
+    }
   } else {
+    entry.fuzzyStreak = 0;
     entry.stage = Number.isInteger(entry.stage) ? entry.stage + 1 : 1;
     if (entry.stage >= REVIEW_INTERVALS.length) {
       entry.graduated = true;

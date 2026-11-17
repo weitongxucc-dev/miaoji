@@ -81,6 +81,47 @@ function looksLocalHost(hostname) {
   return false;
 }
 
+/* 反爬验证页 / 404 / 付费墙识别：宁可报错，也不把验证页当文章存进来 */
+const BLOCK_SIGNS = [
+  { re: /环境异常|完成验证后即可继续访问|请输入验证码|安全验证|访问过于频繁/, reason: '站点触发了环境验证（反爬），请稍后重试或换一个网络' },
+  { re: /Just a moment\.\.\.|Checking your browser|Enable JavaScript and cookies to continue|ddos-guard/i, reason: '站点要求浏览器验证，暂时取不到正文' },
+  { re: /Access Denied|403 Forbidden|You don't have permission|没有权限访问/i, reason: '站点拒绝访问（403），可能需要登录' },
+  { re: /PAGE NOT FOUND|Page not found|页面不存在|404 Not Found|找不到(这个|该)页面/i, reason: '页面不存在（404），检查一下链接' },
+  { re: /会员专享|订阅后|登录后获取|开通会员|付费阅读|VIP ?可见|试读结束|Only available to subscribers|Subscribe to continue|members[- ]only|premium content/i, reason: '只拿到试读内容，完整正文需要登录或会员' }
+];
+
+/**
+ * 判断抓到的文字是不是「假失败真成功」。
+ * 只在文字偏短时匹配（长文里出现这些词很可能是正文在讨论它们）。
+ * 返回空字符串表示正常。
+ */
+function blockedReason(text) {
+  const t = String(text || '').trim();
+  if (!t) return '';
+  if (t.length >= 2000) return '';
+  const head = t.slice(0, 400);
+  const tail = t.slice(-400);
+  for (const s of BLOCK_SIGNS) {
+    if (s.re.test(head) || s.re.test(tail)) return s.reason;
+  }
+  return '';
+}
+
+/** 正文是否达到收藏门槛：太短或像导航/验证页都不收 */
+function textQualityIssue(text, title, site) {
+  const t = String(text || '').trim();
+  const block = blockedReason(t);
+  if (block) return block;
+  if (t.length < 120) return '没有抓到正文，页面可能需要登录、由脚本渲染，或内容太短';
+  const titleText = String(title || '').trim();
+  const hostText = String(site || '').trim().toLowerCase();
+  if (titleText && hostText && titleText.toLowerCase().replace(/^www\./, '') === hostText.replace(/^www\./, '')) {
+    // 标题退化成域名，通常说明这不是一篇正常文章
+    return '没有识别到文章标题，可能抓到了验证页或导航页';
+  }
+  return '';
+}
+
 async function renderExtract(rawUrl, opts = {}) {
   let electron;
   try {
@@ -375,7 +416,12 @@ async function fetchHtml(rawUrl, opts = {}) {
       if (!ALLOW_LOCAL_FETCH) await assertPublicHost(current.hostname);
       continue;
     }
-    if (status >= 400) throw new Error(`网页返回 ${status}，可能无法访问`);
+    if (status >= 400) {
+      if (status === 401 || status === 403) throw new Error(`站点拒绝访问（${status}），可能需要登录或触发了反爬`);
+      if (status === 404) throw new Error('页面不存在（404），检查一下链接');
+      if (status === 429) throw new Error('访问太频繁（429），稍等一会儿再试');
+      throw new Error(`网页返回 ${status}，可能无法访问`);
+    }
     const buffer = decompress(body, res.headers['content-encoding']);
     const charset = detectCharset(buffer, res.headers['content-type']);
     return { url: current.toString(), html: decodeBody(buffer, charset) };
@@ -399,7 +445,7 @@ async function extractFromUrl(rawUrl, opts = {}) {
     renderError = err;
     if (err && /局域网|本机/.test(String(err.message))) throw err;
   }
-  if (rendered && rendered.text && rendered.text.length >= 40) {
+  if (rendered && rendered.text) {
     let text = String(rendered.text).trim();
     const title = String(rendered.title || '').trim().slice(0, 160);
     // h1 往往和标题重复，去掉开头那一行，避免原文里出现两遍标题
@@ -409,20 +455,23 @@ async function extractFromUrl(rawUrl, opts = {}) {
         text = text.slice(firstLine.length).trim();
       }
     }
-    if (text && text.length >= 40) {
+    if (text) {
       const u = new URL(String(rawUrl).trim());
-      return {
-        ok: true,
-        url: u.toString(),
-        title: title || u.hostname,
-        site: u.hostname.replace(/^www\./, ''),
-        publishedAt: String(rendered.publishedAt || ''),
-        excerpt: text.slice(0, 120),
-        text: text.slice(0, 200000),
-        extractor: 'render'
-      };
+      const issue = textQualityIssue(text, title, u.hostname.replace(/^www\./, ''));
+      if (!issue) {
+        return {
+          ok: true,
+          url: u.toString(),
+          title: title || u.hostname,
+          site: u.hostname.replace(/^www\./, ''),
+          publishedAt: String(rendered.publishedAt || ''),
+          excerpt: text.slice(0, 120),
+          text: text.slice(0, 200000),
+          extractor: 'render'
+        };
+      }
+      // 渲染结果不可信（验证页/太短等），再试静态抓取
     }
-    // 渲染结果太薄，落到静态兜底
   }
 
   // 静态兜底
@@ -436,13 +485,15 @@ async function extractFromUrl(rawUrl, opts = {}) {
       text = text.slice(firstLine.length).trim();
     }
   }
-  if (!text || text.length < 40) throw new Error('没有抓到正文，可能是不支持的页面（需要登录或由脚本渲染）');
   const u = new URL(url);
+  const site = u.hostname.replace(/^www\./, '');
+  const issue = textQualityIssue(text, meta.title, site);
+  if (issue) throw new Error(issue);
   return {
     ok: true,
     url,
     title: meta.title || u.hostname,
-    site: u.hostname.replace(/^www\./, ''),
+    site,
     publishedAt: meta.publishedAt,
     excerpt: text.slice(0, 120),
     text: text.slice(0, 200000),
