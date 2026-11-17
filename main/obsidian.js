@@ -62,7 +62,7 @@ created: ${today}
 
 # 📒 秒记生词本
 
-> 由桌面小工具「秒记」自动维护。同一个词查询多次只会累计次数，不会重复收录；查询满阈值会自动进入上方热词榜。
+> 由桌面小工具「秒记」自动维护。同一个词在同一个方向下查询多次只会累计次数；换一个方向会另存一条，分别复习。
 > 如果想补自己的笔记，请写在每个词条的标记块之外，工具更新时不会覆盖。
 
 ${HOT_START}
@@ -88,7 +88,10 @@ function hotBlock(entries, config) {
 `;
   }
   const rows = list
-    .map((e) => `| **${cell(e.word)}** | ${cell(e.meaning_zh || e.sentence_translation).slice(0, 48)} | ${e.count} | ${fmt(e.lastAt, false)} |`)
+    .map((e) => {
+      const tn = trackLabel(config, e.track);
+      return `| **${cell(e.word)}**${tn ? ` · ${cell(tn)}` : ''} | ${cell(e.meaning_zh || e.sentence_translation).slice(0, 48)} | ${e.count} | ${fmt(e.lastAt, false)} |`;
+    })
     .join('\n');
   return `## 🔥 热词榜
 
@@ -442,6 +445,31 @@ function remove(key, entries, config) {
 }
 
 /**
+ * 词条换方向时主键会变：把原标记块的开头/结尾改成新键，只改标记，不动块内内容。
+ * 新键的标记已经存在时不自动合并，交给上层提示用户。
+ */
+function rename(oldKey, newKey, config) {
+  const file = noteFile(config);
+  if (!file) return { ok: true, skipped: true, path: '' };
+  if (!oldKey || !newKey || oldKey === newKey) return { ok: true, skipped: true, path: file };
+  const rawDoc = readDoc(file);
+  if (rawDoc === null) return { ok: true, skipped: true, path: file };
+  const oldM = markers(oldKey);
+  const newM = markers(newKey);
+  if (!rawDoc.includes(oldM.start) && !rawDoc.includes(oldM.end)) {
+    return { ok: true, skipped: true, path: file };
+  }
+  if (rawDoc.includes(newM.start) || rawDoc.includes(newM.end)) {
+    return { ok: false, error: '笔记里已经有这个方向的词条块，未自动合并', path: file };
+  }
+  const doc = rawDoc
+    .split(oldM.start).join(newM.start)
+    .split(oldM.end).join(newM.end);
+  writeDoc(file, doc);
+  return { ok: true, path: file, renamed: true };
+}
+
+/**
  * 按本地记录重新生成整篇笔记（会保留文件头部之外的人工内容？不会——这是一次全量重建）。
  */
 function syncAll(entries, config) {
@@ -535,4 +563,4 @@ function writeWeekly(report, config, period) {
   return { ok: true, path: file, created: existing === null };
 }
 
-module.exports = { upsert, update, remove, syncAll, baseDoc, writeWeekly };
+module.exports = { upsert, update, remove, rename, syncAll, baseDoc, writeWeekly };

@@ -37,7 +37,8 @@ const TOOL_DEFS = [
     limit: { type: 'number', description: '最多返回几条，默认 5' }
   }, ['query']),
   toolDef('save_term', '查一个单词、短语、术语或中文概念，生成词条并保存到本机词条库（同时写 Obsidian）。', {
-    text: { type: 'string', description: '要查询并保存的内容' }
+    text: { type: 'string', description: '要查询并保存的内容' },
+    track: { type: 'string', description: '可选：学习方向名称。用户明确说了方向时填，AI 会按该方向解释' }
   }, ['text']),
   toolDef('set_entry_track', '修改某个已收录词条的学习方向；方向不存在时会自动创建。', {
     key: { type: 'string', description: '词条主键，通常来自 search_entries 或 save_term 的结果' },
@@ -130,6 +131,11 @@ async function collectClipTerms(key, limit, onProgress) {
   const terms = (entry.terms || []).slice(0, max);
   if (!terms.length) throw new Error('这条记录没有标注术语');
   const confNow = store.loadConfig();
+  // 剪藏本身带方向时，里面的术语按同一个方向解释；没方向才让 AI 自行建议
+  const forcedTrack = entry.track
+    ? (confNow.tracks || []).find((t) => t.id === entry.track) || null
+    : null;
+  const forcedName = forcedTrack ? forcedTrack.name : '';
   const results = [];
   for (let i = 0; i < terms.length; i += 1) {
     const t = terms[i];
@@ -137,8 +143,10 @@ async function collectClipTerms(key, limit, onProgress) {
       onProgress({ index: i, total: terms.length, word: t.word });
     }
     try {
-      const fresh = await ai.askDeepSeek(t.word, confNow);
-      if (fresh.track) {
+      const fresh = await ai.askDeepSeek(t.word, confNow, forcedName);
+      if (forcedTrack) {
+        fresh.track = forcedTrack.id;
+      } else if (fresh.track) {
         const hit = (confNow.tracks || []).find((x) => x.name === fresh.track);
         fresh.track = hit ? hit.id : '';
       }
@@ -175,16 +183,27 @@ async function execute(name, args, conf) {
   if (name === 'save_term') {
     const text = String(args.text || '').trim();
     if (!text) return { ok: false, error: '内容为空' };
-    const fresh = await ai.askDeepSeek(text, conf);
+    const trackName = String(args.track || '').trim().slice(0, 16);
+    let forcedTrack = null;
+    if (trackName) {
+      forcedTrack = (conf.tracks || []).find((t) => t.name === trackName) || null;
+      if (!forcedTrack) {
+        forcedTrack = { id: 't' + Date.now().toString(36), name: trackName, desc: '' };
+        store.saveConfig({ tracks: [...(conf.tracks || []), forcedTrack] });
+      }
+    }
+    const fresh = await ai.askDeepSeek(text, conf, forcedTrack ? forcedTrack.name : '');
     const live = store.loadConfig();
-    if (fresh.track) {
+    if (forcedTrack) {
+      fresh.track = forcedTrack.id;
+    } else if (fresh.track) {
       const hit = (live.tracks || []).find((t) => t.name === fresh.track);
       fresh.track = hit ? hit.id : '';
     }
     const { entry, isNew } = store.upsertEntry(fresh);
     let write = { ok: true, skipped: true };
     try {
-      write = obsidian.upsert(entry, store.listEntries(), conf);
+      write = obsidian.upsert(entry, store.listEntries(), live);
     } catch (err) {
       write = { ok: false, error: err && err.message ? err.message : String(err) };
     }
@@ -203,8 +222,12 @@ async function execute(name, args, conf) {
       tracks.push(hit);
       store.saveConfig({ tracks });
     }
-    const entry = store.setEntryTrack(key, hit.id);
+    const result = store.setEntryTrack(key, hit.id);
+    const entry = result.entry;
     try {
+      if (result.oldKey && result.oldKey !== entry.key) {
+        obsidian.rename(result.oldKey, entry.key, store.loadConfig());
+      }
       obsidian.update(entry, store.listEntries(), store.loadConfig());
     } catch {
       /* 笔记写入失败不影响本地记录 */

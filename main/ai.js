@@ -1,7 +1,7 @@
 'use strict';
 
-const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也研究词源与技术史。服务对象是中文母语的英语学习者。
-用户会给你一个英文单词、短语或句子。请先判断类型，然后只输出一个 JSON 对象（不要 markdown 代码块、不要任何解释）。
+const SYSTEM_PROMPT = `你是一位严谨的跨领域术语解释编辑，同时也研究词源与技术史。服务对象是中文母语、需要不断进入陌生领域的知识工作者（产品、运营、管理、财务、技术、咨询、创业等）。
+用户会给你一个英文单词、短语、句子、中文概念或行业术语。请先判断类型，然后只输出一个 JSON 对象（不要 markdown 代码块、不要任何解释）。
 
 如果是领域术语、概念、行业缩写（中文或英文，如「幂等性」「VMI」「安全左移」），输出：
 {
@@ -29,7 +29,8 @@ const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也
     "why": "值得注意的辨析：容易和什么概念混淆、关键差别是什么",
     "related": ["周边概念，最多 4 个"]
   },
-  "followups": ["围绕这个术语的短问题", "围绕用法的短问题", "围绕相关概念的短问题"]
+  "followups": ["围绕这个术语的短问题", "围绕用法的短问题", "围绕相关概念的短问题"],
+  "track": "当前学习方向名称；用户没指定或都不贴近就给空字符串"
 }
 
 如果是单词或短语，输出：
@@ -58,7 +59,8 @@ const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也
     "why": "为什么值得知道：常见误解、技术语境中的关键差别、使用边界。没有就给空字符串",
     "related": ["相关词、词根或概念，最多 4 个"]
   },
-  "followups": ["围绕词义辨析的短问题", "围绕用法或搭配的短问题", "围绕词源或技术背景的短问题"]
+  "followups": ["围绕词义辨析的短问题", "围绕用法或搭配的短问题", "围绕词源或技术背景的短问题"],
+  "track": "当前学习方向名称；用户没指定或都不贴近就给空字符串"
 }
 
 如果是句子，输出：
@@ -80,7 +82,8 @@ const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也
     "why": "值得注意的语气、歧义或文化背景",
     "related": ["相关表达或语法点，最多 4 个"]
   },
-  "followups": ["围绕语法的短问题", "围绕词义的短问题", "围绕语境的短问题"]
+  "followups": ["围绕语法的短问题", "围绕词义的短问题", "围绕语境的短问题"],
+  "track": "当前学习方向名称；用户没指定或都不贴近就给空字符串"
 }
 
 硬性要求：
@@ -89,7 +92,7 @@ const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也
 3. 技术术语的 origin.story 要讲清楚它在专业语境里怎么被使用，而不只是普通词义。
 4. followups 给 3 条，每条不超过 24 个字，必须是用户真的会想问的问题。
 5. 正文里可以用 **加粗** 标出关键对比或易混点，每个字段最多 1 处；不要用标题、表格或代码块。
-6. 术语（kind 为 term）的解释要贴合用户声明或最贴近的学习方向。
+6. 术语和单词的解释都要贴合当前学习方向；同一个词在不同方向下含义不同（如 port 在网络里是端口、物流里是港口），必须按方向解释，不要用通用词典释义代替。
 7. 只输出 JSON。所有中文内容使用简体中文。`;
 
 const NOTE_PROMPT = `你是「秒记」的整理助手。用户会给你一段随手记下的想法或摘录（可能很口语、没有结构）。
@@ -511,9 +514,20 @@ function normalizeLookup(raw, text) {
 }
 
 /**
- * 把用户的学习方向注入提示词：AI 按「track」字段建议归属，并贴合领域语境解释。
+ * 把用户的学习方向注入提示词。
+ * forcedTrack 有值时表示用户在界面上明确选了方向：必须按它解释，不再让 AI 自行挑。
+ * 没有 forcedTrack 时才让 AI 从已有方向里建议归属。
  */
-function withTrackContext(trackNames) {
+function withTrackContext(trackNames, forcedTrack) {
+  const forced = String(forcedTrack || '').trim();
+  if (forced) {
+    return [
+      '',
+      `用户当前学习方向是「${forced}」。`,
+      `必须按这个方向解释，不要换成别的领域；输出的 "track" 字段固定为「${forced}」。`,
+      `同一个词在不同领域含义不同（如 port 在网络里是端口、物流里是港口），必须按当前方向解释。`
+    ].join('\n');
+  }
   const names = (Array.isArray(trackNames) ? trackNames : []).filter(Boolean);
   if (!names.length) return '';
   return [
@@ -524,7 +538,7 @@ function withTrackContext(trackNames) {
   ].join('\n');
 }
 
-async function askDeepSeek(text, config) {
+async function askDeepSeek(text, config, forcedTrack) {
   const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
   if (process.env.MIAOJI_MOCK === '1') {
     await new Promise((r) => setTimeout(r, 600));
@@ -532,7 +546,7 @@ async function askDeepSeek(text, config) {
   }
   const content = await callChat(
     [
-      { role: 'system', content: SYSTEM_PROMPT + withTrackContext(trackNames) },
+      { role: 'system', content: SYSTEM_PROMPT + withTrackContext(trackNames, forcedTrack) },
       { role: 'user', content: String(text).trim() }
     ],
     config,
@@ -542,7 +556,7 @@ async function askDeepSeek(text, config) {
 }
 
 /** 抓到的网页正文 → 摘要 + 关键点 + 术语标注 */
-async function summarizeClip(page, config) {
+async function summarizeClip(page, config, forcedTrack) {
   const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
   if (process.env.MIAOJI_MOCK === '1') {
     await new Promise((r) => setTimeout(r, 600));
@@ -559,7 +573,7 @@ async function summarizeClip(page, config) {
   ].filter(Boolean).join('\n');
   const content = await callChat(
     [
-      { role: 'system', content: CLIP_PROMPT + withTrackContext(trackNames) },
+      { role: 'system', content: CLIP_PROMPT + withTrackContext(trackNames, forcedTrack) },
       { role: 'user', content: material }
     ],
     config,
@@ -569,7 +583,7 @@ async function summarizeClip(page, config) {
 }
 
 /** 随手记的文字 → 轻整理（不改写原意） */
-async function cleanNote(text, config) {
+async function cleanNote(text, config, forcedTrack) {
   const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
   if (process.env.MIAOJI_MOCK === '1') {
     await new Promise((r) => setTimeout(r, 500));
@@ -577,7 +591,7 @@ async function cleanNote(text, config) {
   }
   const content = await callChat(
     [
-      { role: 'system', content: NOTE_PROMPT + withTrackContext(trackNames) },
+      { role: 'system', content: NOTE_PROMPT + withTrackContext(trackNames, forcedTrack) },
       { role: 'user', content: String(text || '').slice(0, 6000) }
     ],
     config,
@@ -587,7 +601,7 @@ async function cleanNote(text, config) {
 }
 
 /** 中文 → 英文表达 */
-async function lookupZh(text, config) {
+async function lookupZh(text, config, forcedTrack) {
   const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
   if (process.env.MIAOJI_MOCK === '1') {
     await new Promise((r) => setTimeout(r, 500));
@@ -595,7 +609,7 @@ async function lookupZh(text, config) {
   }
   const content = await callChat(
     [
-      { role: 'system', content: LOOKUP_PROMPT + withTrackContext(trackNames) },
+      { role: 'system', content: LOOKUP_PROMPT + withTrackContext(trackNames, forcedTrack) },
       { role: 'user', content: String(text || '').trim() }
     ],
     config,
@@ -1021,5 +1035,6 @@ module.exports = {
   extractJson,
   normalizeEntry,
   normalizeFollowUp,
+  withTrackContext,
   testConnection
 };

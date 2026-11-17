@@ -235,6 +235,29 @@ function clipKeyFor(url) {
   return u ? 'clip:' + u.replace(/#.*$/, '') : '';
 }
 
+/** 术语类词条：同一条术语在不同学习方向下各存一份，分别复习 */
+const TERM_KINDS = new Set(['word', 'sentence', 'term', 'lookup']);
+
+/**
+ * 术语类词条的主键：
+ * - 第一个方向沿用原来的裸词主键，老数据不用迁移，Obsidian 标记块也不用重写；
+ * - 同一个词换到另一个方向时，用「裸词@方向 id」另存一条，避免互相覆盖；
+ * - 剪藏、闪念保持原有主键规则。
+ * 方向 id 只作为内部标识，界面始终显示方向名称。
+ */
+function entryKeyFor(text, kind, trackId, data) {
+  const base = keyFor(text);
+  if (!base) return '';
+  if (!TERM_KINDS.has(kind)) return base;
+  const t = String(trackId || '');
+  const existing = data.entries[base];
+  if (!existing) return base;
+  // 裸词主键被闪念或剪藏占用时，术语另起一个键，避免把别的记录覆盖掉
+  if (!TERM_KINDS.has(existing.kind)) return `${base}@${t || 'none'}`;
+  if (String(existing.track || '') === t) return base;
+  return `${base}@${t || 'none'}`;
+}
+
 function sanitizeSource(raw) {
   const s = raw && typeof raw === 'object' ? raw : {};
   const out = {
@@ -265,9 +288,10 @@ function sanitizeTerms(raw) {
 
 function upsertEntry(fresh) {
   const data = loadEntries();
-  // 剪藏用 clip:<url> 作主键；其它类型用词条文本
+  // 剪藏用 clip:<url> 作主键；术语类词条按「术语 × 方向」各存一条
+  const kind = ['word', 'sentence', 'term', 'note', 'clip', 'lookup'].includes(fresh.kind) ? fresh.kind : 'word';
   const explicitKey = String(fresh.key || '').trim();
-  const key = explicitKey || keyFor(fresh.word || '');
+  const key = explicitKey || entryKeyFor(fresh.word || '', kind, fresh.track, data);
   if (!key) throw new Error('词条为空，无法记录');
 
   const now = new Date();
@@ -277,7 +301,7 @@ function upsertEntry(fresh) {
   const entry = {
     ...fresh,
     key,
-    kind: ['word', 'sentence', 'term', 'note', 'clip', 'lookup'].includes(fresh.kind) ? fresh.kind : 'word',
+    kind,
     source: sanitizeSource(fresh.source),
     original: typeof fresh.original === 'string' ? fresh.original : '',
     summary: String(fresh.summary || ''),
@@ -288,7 +312,10 @@ function upsertEntry(fresh) {
     mastered: existing ? Boolean(existing.mastered) : false,
     masteredAt: existing ? (existing.masteredAt || null) : null,
     // 复习调度：新词条收下次日到期；重查保留进度，未排期过的老词条排入队列
-    track: existing ? (existing.track || '') : String(fresh.track || ''),
+    // 指定了方向就写进这一条；没指定时保留原方向，避免自动建议把老词条搬走
+    track: existing
+      ? (String(fresh.track || '') || String(existing.track || ''))
+      : String(fresh.track || ''),
     stage: existing ? (existing.stage ?? 0) : 0,
     graduated: existing ? Boolean(existing.graduated) : false,
     nextReviewAt: existing && existing.nextReviewAt
@@ -423,14 +450,56 @@ function recordReview(key, grade) {
 
 /**
  * 词条的学习方向（track 存 id）
+ * 术语类词条换方向时一起换主键：第一个方向继续用裸词键，其余方向用「裸词@方向 id」。
+ * 目标方向下已经有同一条术语时拒绝，不静默合并或覆盖。
  */
 function setEntryTrack(key, trackId) {
   const data = loadEntries();
   const entry = data.entries[key];
   if (!entry) throw new Error('找不到该词条');
-  entry.track = String(trackId || '');
+  const t = String(trackId || '');
+  const oldKey = entry.key;
+  let newKey = oldKey;
+
+  if (TERM_KINDS.has(entry.kind)) {
+    const base = keyFor(entry.word || '');
+    if (base) {
+      const baseEntry = data.entries[base];
+      if (oldKey === base) {
+        // 裸词键始终留给「第一个方向」；如果另一个方向的副本已经存在，不把两条并成一条
+        const variantKey = `${base}@${t || 'none'}`;
+        if (data.entries[variantKey] && String(data.entries[variantKey].track || '') === t) {
+          throw new Error('这个方向下已经有同一条术语，先删掉另一条再改');
+        }
+        newKey = base;
+      } else if (!baseEntry) {
+        newKey = base;
+        // 把副本提成裸词键时，也要确认目标方向的副本不存在，避免同词同方向两条
+        const variantKey = `${base}@${t || 'none'}`;
+        const variant = data.entries[variantKey];
+        if (variant && variant.key !== oldKey && String(variant.track || '') === t) {
+          throw new Error('这个方向下已经有同一条术语，先删掉另一条再改');
+        }
+      } else if (String(baseEntry.track || '') === t) {
+        throw new Error('这个方向下已经有同一条术语，先删掉另一条再改');
+      } else {
+        newKey = `${base}@${t || 'none'}`;
+      }
+    }
+  }
+
+  if (newKey !== oldKey && data.entries[newKey]) {
+    throw new Error('这个方向下已经有同一条术语，先删掉另一条再改');
+  }
+  if (newKey !== oldKey) {
+    delete data.entries[oldKey];
+    entry.key = newKey;
+    data.entries[newKey] = entry;
+  }
+  entry.track = t;
   persistEntries();
-  return entry;
+  // oldKey 交给主进程去改 Obsidian 标记块
+  return { entry, oldKey };
 }
 
 /**
@@ -488,6 +557,7 @@ module.exports = {
   deleteEntry,
   getEntry,
   keyFor,
+  entryKeyFor,
   clipKeyFor,
   DIR
 };

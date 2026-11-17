@@ -9,7 +9,7 @@ const EVENTS = ['ui:expanded', 'ui:collapsed', 'ui:nav', 'ui:toast', 'ui:focus',
 
 contextBridge.exposeInMainWorld('api', {
   init: () => invoke('app:init'),
-  query: (text, mode) => invoke('ai:query', text, mode),
+  query: (text, mode, trackId) => invoke('ai:query', text, mode, trackId),
   followUp: (key, question) => invoke('ai:followup', key, question),
   testApi: () => invoke('ai:test'),
   saveConfig: (patch) => invoke('config:save', patch),
@@ -32,7 +32,7 @@ contextBridge.exposeInMainWorld('api', {
   remove: (key) => invoke('entry:delete', key),
   submitReview: (key, grade) => invoke('review:submit', key, grade),
   setEntryTrack: (key, trackId) => invoke('entry:set-track', key, trackId),
-  collectTerm: (word) => invoke('term:collect', word),
+  collectTerm: (word, trackId) => invoke('term:collect', word, trackId),
   openUrl: (url) => invoke('app:open-url', url),
   generateQuiz: (keys) => invoke('quiz:generate', keys),
   weeklyReport: () => invoke('weekly:report'),

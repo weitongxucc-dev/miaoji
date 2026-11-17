@@ -73,6 +73,26 @@ const agent = require('./agent');
 const stats = require('./stats');
 const update = require('./update');
 
+/** 用户在收录页明确选中的方向；没选时返回 null，让 AI 自行建议 */
+function forcedTrackFor(conf, trackId) {
+  const id = String(trackId || '').trim();
+  if (!id) return null;
+  return (conf.tracks || []).find((t) => t.id === id) || null;
+}
+
+/** 明确选了方向就写死；没选时才把 AI 建议的方向名称映射成 id */
+function applyTrackResult(fresh, conf, forcedTrack) {
+  if (forcedTrack) {
+    fresh.track = forcedTrack.id;
+    return fresh;
+  }
+  if (fresh.track) {
+    const hit = (conf.tracks || []).find((t) => t.name === fresh.track);
+    fresh.track = hit ? hit.id : '';
+  }
+  return fresh;
+}
+
 const PET_W = 128;
 const PET_H = 152;
 const PANEL_W = 440;
@@ -596,19 +616,24 @@ ipcMain.handle('ai:test', async () => {
 
 ipcMain.handle('clipboard:read', async () => (await clipboard.readText()) || '');
 
-ipcMain.handle('ai:query', async (_e, text, mode) => {
+ipcMain.handle('ai:query', async (_e, text, mode, trackId) => {
   const input = String(text || '').trim();
   if (!input) return { ok: false, error: '先输入要查的内容' };
   try {
     const conf = store.loadConfig();
+    const forcedTrack = forcedTrackFor(conf, trackId);
+    if (String(trackId || '').trim() && !forcedTrack) {
+      return { ok: false, error: '找不到这个学习方向，请重新选择' };
+    }
+    const forcedName = forcedTrack ? forcedTrack.name : '';
     const m = ['auto', 'lookup', 'note'].includes(mode) ? mode : 'auto';
     let fresh;
     let explicitKey = '';
 
     if (m === 'lookup') {
-      fresh = await lookupZh(input, conf);
+      fresh = await lookupZh(input, conf, forcedName);
     } else if (m === 'note') {
-      fresh = await cleanNote(input, conf);
+      fresh = await cleanNote(input, conf, forcedName);
     } else if (/^https?:\/\/\S+$/i.test(input) && video.detect(input)) {
       // 视频链接 → yt-dlp 取标题/简介/字幕，全在本机完成
       const v = await video.fetchVideo(input, { cookiesFromBrowser: conf.videoCookies });
@@ -629,7 +654,7 @@ ipcMain.handle('ai:query', async (_e, text, mode) => {
         }
       };
       const richEnough = v.transcript || (v.description && v.description.length >= 40);
-      fresh = richEnough ? await summarizeClip(page, conf) : minimalClip(page);
+      fresh = richEnough ? await summarizeClip(page, conf, forcedName) : minimalClip(page);
       explicitKey = store.clipKeyFor(v.url);
     } else if (/^https?:\/\/\S+$/i.test(input)) {
       // 链接 → 抓正文、摘要、术语标注，原文一起保存
@@ -638,20 +663,16 @@ ipcMain.handle('ai:query', async (_e, text, mode) => {
         cookies: conf.articleCookies || '',
         cookiesHost: conf.articleCookiesHost || ''
       });
-      fresh = await summarizeClip(page, conf);
+      fresh = await summarizeClip(page, conf, forcedName);
       explicitKey = store.clipKeyFor(page.url);
     } else if (/[一-龥]/.test(input) && input.length >= 40 && !/[a-zA-Z]{4,}/.test(input)) {
       // 较长的纯中文输入按「闪念」处理，避免被当成术语
-      fresh = await cleanNote(input, conf);
+      fresh = await cleanNote(input, conf, forcedName);
     } else {
-      fresh = await askDeepSeek(input, conf);
+      fresh = await askDeepSeek(input, conf, forcedName);
     }
 
-    // AI 建议的学习方向（名称）映射成 id
-    if (fresh.track) {
-      const hit = (conf.tracks || []).find((t) => t.name === fresh.track);
-      fresh.track = hit ? hit.id : '';
-    }
+    applyTrackResult(fresh, conf, forcedTrack);
     if (explicitKey) fresh.key = explicitKey;
     const { entry, isNew } = store.upsertEntry(fresh);
     const all = store.listEntries();
@@ -667,16 +688,17 @@ ipcMain.handle('ai:query', async (_e, text, mode) => {
   }
 });
 
-ipcMain.handle('term:collect', async (_e, word) => {
+ipcMain.handle('term:collect', async (_e, word, trackId) => {
   const text = String(word || '').trim();
   if (!text) return { ok: false, error: '术语为空' };
   try {
     const conf = store.loadConfig();
-    const fresh = await askDeepSeek(text, conf);
-    if (fresh.track) {
-      const hit = (conf.tracks || []).find((t) => t.name === fresh.track);
-      fresh.track = hit ? hit.id : '';
+    const forcedTrack = forcedTrackFor(conf, trackId);
+    if (String(trackId || '').trim() && !forcedTrack) {
+      return { ok: false, error: '找不到这个学习方向，请重新选择' };
     }
+    const fresh = await askDeepSeek(text, conf, forcedTrack ? forcedTrack.name : '');
+    applyTrackResult(fresh, conf, forcedTrack);
     const { entry, isNew } = store.upsertEntry(fresh);
     let write = { ok: true, skipped: true };
     try {
@@ -833,18 +855,29 @@ ipcMain.handle('stats:overview', (_e, range) => {
 
 ipcMain.handle('entry:set-track', (_e, key, trackId) => {
   try {
-    const entry = store.setEntryTrack(String(key), String(trackId || ''));
+    const result = store.setEntryTrack(String(key), String(trackId || ''));
+    const entry = result.entry;
     const conf = store.loadConfig();
     const all = store.listEntries();
     let write = { ok: true, skipped: true };
     if (conf.obsidianEnabled) {
+      // 换方向可能换了主键，先把原标记块改名，再刷新块内内容
+      if (result.oldKey && result.oldKey !== entry.key) {
+        try {
+          const renamed = obsidian.rename(result.oldKey, entry.key, conf);
+          if (!renamed.ok) write = renamed;
+        } catch (err) {
+          write = { ok: false, error: err && err.message ? err.message : String(err) };
+        }
+      }
       try {
-        write = obsidian.update(entry, all, conf);
+        const updated = obsidian.update(entry, all, conf);
+        if (write.ok !== false) write = updated;
       } catch (err) {
         write = { ok: false, error: err && err.message ? err.message : String(err) };
       }
     }
-    return { ok: true, entry, obsidian: write };
+    return { ok: true, entry, oldKey: result.oldKey, obsidian: write };
   } catch (err) {
     return { ok: false, error: err && err.message ? err.message : String(err) };
   }

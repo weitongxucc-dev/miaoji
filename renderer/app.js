@@ -19,6 +19,7 @@ const el = {
   input: $('#input'),
   btnParse: $('#btnParse'),
   modeSeg: $('#modeSeg'),
+  captureTrack: $('#captureTrack'),
   clipChip: $('#clipChip'),
   result: $('#result'),
   hotSearch: $('#hotSearch'),
@@ -92,6 +93,7 @@ const state = {
   tab: 'jot',
   filter: 'hot',
   search: '',
+  captureTrack: '',
   busy: false,
   expanded: false,
   clip: '',
@@ -1235,8 +1237,11 @@ function renderEmpty() {
     ${needKey
       ? `<div class="recent-row"><button class="recent-chip warn" data-settings>去设置 API Key</button></div>`
       : ''}
-    ${recent.length ? `<div class="recent-row"><span class="recent-label">最近</span>${recent.map((e) => `
-      <button class="recent-chip" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}">${esc(truncate(e.word, 18))}</button>`).join('')}</div>` : ''}
+    ${recent.length ? `<div class="recent-row"><span class="recent-label">最近</span>${recent.map((e) => {
+      const tn = trackNameOf(e.track);
+      return `
+      <button class="recent-chip" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? ' · ' + esc(tn) : ''}">${esc(truncate(e.word, 18))}${tn ? ` <span class="recent-track">${esc(tn)}</span>` : ''}</button>`;
+    }).join('')}</div>` : ''}
   </div>`;
   startEmptyRobot();
 }
@@ -1323,7 +1328,8 @@ function hotItemHTML(e, idx) {
   const isSentence = e.kind === 'sentence';
   const meaning = entryGist(e);
   const mastered = e.mastered ? ' mastered' : '';
-  return `<button class="hot-row${isSentence ? ' is-sentence' : ''}${mastered}" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}">
+  const tn = trackNameOf(e.track);
+  return `<button class="hot-row${isSentence ? ' is-sentence' : ''}${mastered}" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? ' · ' + esc(tn) : ''}">
     <span class="idx">${pad2(idx + 1)}</span>
     <span class="hot-main">
       <span class="hot-word-line">
@@ -1332,7 +1338,7 @@ function hotItemHTML(e, idx) {
         ${e.mastered ? '<span class="hot-count">✓</span>' : ''}
       </span>
       <span class="hot-meaning">${esc(truncate(meaning, 58))}</span>
-      <span class="hot-meta"><span>${fmtShort(e.lastAt)}</span><span>${(e.thread && e.thread.length) ? '有追问' : '未追问'}</span></span>
+      <span class="hot-meta">${tn ? `<span class="hot-track">${esc(tn)}</span>` : ''}<span>${fmtShort(e.lastAt)}</span><span>${(e.thread && e.thread.length) ? '有追问' : '未追问'}</span></span>
     </span>
     <span class="chev">${icon('i-chevron')}</span>
   </button>`;
@@ -1385,8 +1391,23 @@ function renderHot() {
   el.hotList.innerHTML = list.map((e, i) => hotItemHTML(e, i)).join('');
 }
 
+function renderCaptureTrack() {
+  if (!el.captureTrack) return;
+  const tracks = state.config?.tracks || [];
+  const current = tracks.some((t) => t.id === state.captureTrack) ? state.captureTrack : '';
+  state.captureTrack = current;
+  el.captureTrack.innerHTML = [
+    '<option value="">自动</option>',
+    ...tracks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`)
+  ].join('');
+  el.captureTrack.value = current;
+  const wrap = el.captureTrack.closest('.capture-track');
+  if (wrap) wrap.classList.toggle('hidden', !tracks.length);
+}
+
 function renderAll() {
   renderStats();
+  renderCaptureTrack();
   if (state.tab === 'hot') renderHot();
   if (state.tab === 'review') renderReview();
 }
@@ -2027,7 +2048,7 @@ async function parse(text, mode) {
   renderLoading(input);
 
   try {
-    const res = await window.api.query(input, mode || state.captureMode || 'auto');
+    const res = await window.api.query(input, mode || state.captureMode || 'auto', state.captureTrack || null);
     if (!res.ok) {
       renderError(res.error);
       toast(res.error, 'warn');
@@ -2465,6 +2486,7 @@ async function saveTracks(tracks, msg) {
   }
   state.config = r.config;
   renderTrackList();
+  renderCaptureTrack();
   if (state.lastResult && state.lastResult.entry) renderResult();
   if (msg) toast(msg);
 }
@@ -2501,14 +2523,27 @@ function bindTracks() {
     if (!btn) return;
     const id = btn.dataset.trackDel;
     const tracks = (state.config?.tracks || []).filter((t) => t.id !== id);
-    // 方向被移除后，属于它的词条回到「无方向」
-    for (const entry of Object.values(state.entries)) {
-      if (entry.track === id) {
-        entry.track = '';
-        window.api.setEntryTrack(entry.key, '');
+    // 方向被移除后，属于它的词条回到「无方向」；换方向可能换主键，界面里的键要一起更新
+    const affected = Object.values(state.entries).filter((entry) => entry.track === id);
+    const failed = [];
+    for (const entry of affected) {
+      const oldKey = entry.key;
+      const r = await window.api.setEntryTrack(oldKey, '');
+      if (!r.ok) {
+        failed.push(entry.word);
+        continue;
+      }
+      if (oldKey !== r.entry.key) delete state.entries[oldKey];
+      state.entries[r.entry.key] = r.entry;
+      if (state.lastResult && state.lastResult.entry && state.lastResult.entry.key === oldKey) {
+        state.lastResult.entry = r.entry;
       }
     }
-    await saveTracks(tracks, '已移除方向，相关词条回到无方向');
+    if (state.captureTrack === id) state.captureTrack = '';
+    await saveTracks(tracks, failed.length
+      ? `已移除方向；${failed.length} 条词条因同方向已有同名术语，未自动改回无方向`
+      : '已移除方向，相关词条回到无方向');
+    renderAll();
   });
 
   el.trackPresets.addEventListener('click', (e) => {
@@ -2829,6 +2864,13 @@ function bind() {
     });
   }
 
+  if (el.captureTrack) {
+    el.captureTrack.addEventListener('change', () => {
+      state.captureTrack = el.captureTrack.value || '';
+      el.input.focus();
+    });
+  }
+
   el.input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -2966,7 +3008,9 @@ function bind() {
       const word = btn.dataset.collectTerm;
       if (state.busy) return;
       btn.disabled = true;
-      window.api.collectTerm(word).then((r) => {
+      const clipTrack = state.lastResult?.entry?.track || '';
+      const trackId = (state.config?.tracks || []).some((t) => t.id === clipTrack) ? clipTrack : null;
+      window.api.collectTerm(word, trackId).then((r) => {
         btn.disabled = false;
         if (!r.ok) {
           toast(r.error || '收录失败', 'warn');
@@ -3022,15 +3066,20 @@ function bind() {
     if (!sel) return;
     const entry = state.lastResult && state.lastResult.entry;
     if (!entry) return;
-    const r = await window.api.setEntryTrack(entry.key, sel.value);
+    const oldKey = entry.key;
+    const r = await window.api.setEntryTrack(oldKey, sel.value);
     if (!r.ok) {
       toast(r.error || '设置失败', 'warn');
       return;
     }
-    state.entries[entry.key] = r.entry;
+    if (oldKey !== r.entry.key) delete state.entries[oldKey];
+    state.entries[r.entry.key] = r.entry;
     if (state.lastResult) state.lastResult.entry = r.entry;
+    state.captureTrack = r.entry.track || '';
+    renderAll();
     renderResult();
-    toast('已更新学习方向');
+    if (r.obsidian && r.obsidian.ok === false) toast(r.obsidian.error || '笔记同步失败', 'warn');
+    else toast('已更新学习方向');
   });
 
   el.result.addEventListener('keydown', (e) => {
@@ -3456,6 +3505,7 @@ async function initData() {
     state.expanded = Boolean(data.expanded);
     document.body.classList.toggle('expanded', state.expanded);
     renderStats();
+    renderCaptureTrack();
     renderEmpty();
     if (state.expanded) refreshClipboard(true);
     setHeadAvatar('idle');

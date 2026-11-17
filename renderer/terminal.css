@@ -1015,6 +1015,7 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
 }
 .hot-meaning { color: var(--muted); font-family: var(--font-mono); }
 .hot-meta { color: var(--faint); font-family: var(--font-mono); }
+.hot-meta .hot-track { color: var(--accent-deep); }
 .hot-row .chev { color: var(--faint); }
 .hot-row:hover .chev { color: var(--accent); }
 .hot-empty { color: var(--muted); font-family: var(--font-mono); }
@@ -1344,6 +1345,36 @@ button:focus-visible, [tabindex]:focus-visible {
 }
 .mode-seg button { padding: 3px 7px; font-size: 10px; letter-spacing: 0; white-space: nowrap; }
 .composer-bar .clip-chip { flex: 0 1 auto; }
+
+/* ---------- 收录页：按学习方向解释 ---------- */
+.capture-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.capture-track > span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.capture-track select {
+  max-width: 82px;
+  min-width: 0;
+  padding: 2px 3px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.capture-track select:focus { border-color: var(--accent); outline: none; }
+.composer-bar .clip-chip { max-width: 110px; }
+.composer-bar .parse-btn { flex: 0 0 auto; white-space: nowrap; }
+.recent-chip .recent-track { margin-left: 2px; color: var(--faint); font-size: 9.5px; }
 
 /* ---------- 拖动时隐藏气泡；长按俏皮话 ---------- */
 
