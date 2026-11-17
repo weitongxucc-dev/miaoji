@@ -1820,10 +1820,6 @@ function bindTracks() {
       toast('已经有这个方向了', 'warn');
       return;
     }
-    if (tracks.length >= 12) {
-      toast('方向最多 12 个', 'warn');
-      return;
-    }
     tracks.push({ id: 't' + Date.now().toString(36), name, desc: '' });
     el.trackName.value = '';
     await saveTracks(tracks, `已添加方向「${name}」`);

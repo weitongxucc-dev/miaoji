@@ -92,7 +92,7 @@ function saveConfig(patch) {
   conf.obsidianEnabled = Boolean(conf.obsidianEnabled) && Boolean(conf.obsidianFile);
   conf.obsidianOnboarded = Boolean(conf.obsidianOnboarded);
 
-  // 学习方向：[{ id, name, desc }]
+  // 学习方向：[{ id, name, desc }]，数量由用户决定，不做上限
   if (!Array.isArray(conf.tracks)) conf.tracks = [];
   conf.tracks = conf.tracks
     .map((t, i) => ({
@@ -100,8 +100,7 @@ function saveConfig(patch) {
       name: String(t && t.name ? t.name : '').trim().slice(0, 16),
       desc: String(t && t.desc ? t.desc : '').trim().slice(0, 60)
     }))
-    .filter((t) => t.name)
-    .slice(0, 12);
+    .filter((t) => t.name);
   conf.reviewDaily = Math.max(1, Math.min(20, Math.round(Number(conf.reviewDaily) || DEFAULTS.reviewDaily)));
 
   configCache = conf;

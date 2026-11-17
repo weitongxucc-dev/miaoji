@@ -1,5 +1,5 @@
 /* ============================================================
-   秒记 v1.4.0 · 纸面终端皮肤
+   秒记 v1.4.1 · 纸面终端皮肤
    暖米白纸面 / 等宽字 / 橙色提示 / 像素小机器人
    加载在 styles.css 之后，只覆盖视觉，不改布局结构。
    ============================================================ */
@@ -318,7 +318,7 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
 .track-select:focus { border-color: var(--accent); outline: none; }
 
 /* ---------- 设置：学习方向 ---------- */
-.track-list { display: grid; gap: 5px; margin: 2px 0 9px; }
+.track-list { display: grid; gap: 5px; margin: 2px 0 9px; max-height: 220px; overflow-y: auto; }
 .track-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
