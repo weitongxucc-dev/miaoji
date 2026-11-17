@@ -31,11 +31,22 @@ const el = {
   reviewDue: $('#reviewDue'),
   reviewStats: $('#reviewStats'),
   reviewArea: $('#reviewArea'),
+  btnQuiz: $('#btnQuiz'),
+  statsArea: $('#statsArea'),
+  statsWeek: $('#statsWeek'),
+  agentLog: $('#agentLog'),
+  agentInput: $('#agentInput'),
+  agentChips: $('#agentChips'),
+  btnAgentSend: $('#btnAgentSend'),
   trackList: $('#trackList'),
   trackName: $('#trackName'),
   btnAddTrack: $('#btnAddTrack'),
   trackPresets: $('#trackPresets'),
   cfgReviewDaily: $('#cfgReviewDaily'),
+  cfgClipWatch: $('#cfgClipWatch'),
+  cfgClipPause: $('#cfgClipPause'),
+  clipPauseRow: $('#clipPauseRow'),
+  cfgRecommend: $('#cfgRecommend'),
   cfgKey: $('#cfgKey'),
   cfgBase: $('#cfgBase'),
   cfgModel: $('#cfgModel'),
@@ -86,6 +97,15 @@ const state = {
   onboardShown: false,
   reviewSession: null,
   reviewGrades: [],
+  quiz: null,
+  quizBusy: false,
+  statsData: null,
+  weekly: null,
+  weeklyBusy: false,
+  agentLog: [],
+  agentBusy: false,
+  clipWatchText: '',
+  clipWatchTimer: 0,
   captureMode: 'auto'
 };
 
@@ -715,6 +735,20 @@ function setHeadAvatar(mode, hold = 0) {
 
 /* ---------------- 统计 ---------------- */
 
+/** 后台可能新增了词条（术语流水线 / Agent），重新拉一次本机数据 */
+async function reloadEntries() {
+  try {
+    const data = await window.api.init();
+    state.entries = data.entries || {};
+    state.config = data.config || state.config;
+    renderStats();
+    renderAll();
+    if (state.tab === 'stats') renderStatsView();
+  } catch {
+    /* 拉取失败时保留当前界面 */
+  }
+}
+
 function stats() {
   const all = Object.values(state.entries);
   const today = all.filter((e) => isToday(e.lastAt)).length;
@@ -748,13 +782,20 @@ function renderStats() {
 
   // 气泡：有到期复习时优先提醒「回顾 N」，机器人成为复习信使
   const dueLeft = Math.max(0, s.due.length - Math.min(s.doneToday, s.due.length));
-  if (dueLeft > 0 && s.due.length > 0) {
+  if (state.clipWatchText && !state.expanded) {
+    el.petCount.textContent = '收 ' + truncate(state.clipWatchText, 7);
+    el.bubble.classList.add('clipwatch');
+    el.bubble.classList.remove('hidden');
+  } else if (dueLeft > 0 && s.due.length > 0) {
+    el.bubble.classList.remove('clipwatch');
     el.petCount.textContent = `回顾 ${Math.min(dueLeft, state.config.reviewDaily || 5)}`;
     el.bubble.classList.remove('hidden');
   } else if (s.today > 0) {
+    el.bubble.classList.remove('clipwatch');
     el.petCount.textContent = `今日 ${s.today}`;
     el.bubble.classList.remove('hidden');
   } else if (s.total === 0) {
+    el.bubble.classList.remove('clipwatch');
     el.petCount.textContent = '查词';
     el.bubble.classList.remove('hidden');
   } else {
@@ -1095,6 +1136,9 @@ function clipBasicsZone(e) {
       <ul class="point-list">${e.key_points.map((p) => `<li>${richInline(p)}</li>`).join('')}</ul>`;
   }
   body += termsHTML(e.terms);
+  if (e.terms && e.terms.length) {
+    body += `<button class="btn ghost sm pipeline-btn" data-collect-all="${esc(e.key)}">${icon('i-spark')}把这 ${e.terms.length} 个术语全部收进复习</button>`;
+  }
   if (e.note) body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
   if (e.source && e.source.url) {
     body += `<button class="link-btn sm clip-link" data-open-url="${esc(e.source.url)}">${icon('i-open')}打开原网页</button>`;
@@ -1346,6 +1390,8 @@ function dueEntries() {
 
 function renderReview() {
   if (!state.config || !el.reviewArea) return;
+  if (el.btnQuiz) el.btnQuiz.textContent = state.quiz ? '退出考官' : 'AI 考官';
+  if (state.quiz) return renderQuizCard();
   const s = stats();
 
   // 进行中的会话优先渲染
@@ -1469,11 +1515,16 @@ function renderReviewSummary() {
     return;
   }
   if (el.reviewArea) {
+    const forgot = grades.filter((g) => g.grade === 0).map((g) => g.word);
+    const tip = state.config?.recommendSlot && forgot.length
+      ? `<div class="review-tip">建议：明天先把 ${forgot.slice(0, 2).map((w) => `<b>${esc(w)}</b>`).join('、')} 过一遍，再收新词。</div>`
+      : '';
     el.reviewArea.innerHTML = `<div class="review-done">
       <img src="assets/robot-happy.png" alt="">
       <div class="review-done-title">回顾完成 · ${grades.length} 词</div>
       <div class="review-done-sub">想起来了 ${good} · 需要加强 ${weak + grades.filter((g) => g.grade === 1).length}<br>
         ${weak ? '没想起的词明天会再回来。' : '明天的它还会来找你。'}</div>
+      ${tip}
     </div>`;
   }
   renderStats();
@@ -1482,6 +1533,10 @@ function renderReviewSummary() {
 }
 
 function bindReview() {
+  if (el.btnQuiz) {
+    el.btnQuiz.addEventListener('click', () => startQuiz());
+  }
+
   el.reviewArea.addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
@@ -1494,12 +1549,35 @@ function bindReview() {
       }
     } else if (btn.dataset.reviewGrade !== undefined) {
       submitReviewGrade(Number(btn.dataset.reviewGrade));
+    } else if (btn.dataset.quizOption !== undefined) {
+      answerQuiz(Number(btn.dataset.quizOption));
+    } else if (btn.dataset.quizNext !== undefined) {
+      nextQuiz();
+    } else if (btn.dataset.quizRestart !== undefined) {
+      state.quiz = null;
+      startQuiz();
+    } else if (btn.dataset.reviewBack !== undefined) {
+      state.quiz = null;
+      renderReview();
     }
   });
 
   document.addEventListener('keydown', (e) => {
-    if (state.tab !== 'review' || !state.reviewSession) return;
+    if (state.tab !== 'review') return;
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+
+    if (state.quiz) {
+      if (!state.quiz.revealed && ['1', '2', '3', '4'].includes(e.key)) {
+        e.preventDefault();
+        answerQuiz(Number(e.key) - 1);
+      } else if (state.quiz.revealed && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        nextQuiz();
+      }
+      return;
+    }
+
+    if (!state.reviewSession) return;
     if (e.key === ' ' && !state.reviewSession.flipped) {
       e.preventDefault();
       state.reviewSession.flipped = true;
@@ -1510,6 +1588,367 @@ function bindReview() {
     }
   });
 }
+
+/* ---------------- AI 考官 ---------------- */
+
+function startQuiz() {
+  if (state.quiz) {
+    state.quiz = null;
+    renderReview();
+    return;
+  }
+  if (state.quizBusy) return;
+  const s = stats();
+  const remaining = Math.max(0, (state.config.reviewDaily || 5) - s.doneToday);
+  const keys = dueEntries().slice(0, remaining).map((e) => e.key);
+  if (!keys.length) {
+    toast(s.due.length ? '今天的复习额度用完了，明天再来' : '今天没有到期的词，考官先休息');
+    renderReview();
+    return;
+  }
+  state.quizBusy = true;
+  state.reviewSession = null;
+  if (el.btnQuiz) {
+    el.btnQuiz.disabled = true;
+    el.btnQuiz.textContent = '出题中…';
+  }
+  el.reviewArea.innerHTML = `<div class="review-done">
+    <img src="assets/robot-think.png" alt="">
+    <div class="review-empty-title">AI 正在出题</div>
+    <div class="review-empty-sub">按你到期的词生成单选题，答完自动判分并安排下一次复习。</div>
+  </div>`;
+  window.api.generateQuiz(keys).then((r) => {
+    if (!r.ok) {
+      toast(r.error || '出题失败', 'warn');
+      renderReview();
+      return;
+    }
+    state.quiz = { questions: r.questions, idx: 0, selected: null, revealed: false, answers: [] };
+    renderQuizCard();
+  }).catch((err) => {
+    toast('出题失败：' + (err && err.message ? err.message : err), 'warn');
+    renderReview();
+  }).finally(() => {
+    state.quizBusy = false;
+    if (el.btnQuiz) {
+      el.btnQuiz.disabled = false;
+      el.btnQuiz.textContent = state.quiz ? '退出考官' : 'AI 考官';
+    }
+  });
+}
+
+function renderQuizCard() {
+  const qz = state.quiz;
+  if (!qz || !el.reviewArea) return;
+  if (qz.idx >= qz.questions.length) return renderQuizSummary();
+
+  const q = qz.questions[qz.idx];
+  const progress = `考官 · ${qz.idx + 1}/${qz.questions.length}`;
+  let options = q.options.map((opt, i) => {
+    let cls = 'quiz-option';
+    if (qz.revealed) {
+      if (i === q.answer) cls += ' is-correct';
+      else if (i === qz.selected) cls += ' is-wrong';
+    }
+    return `<button class="${cls}" data-quiz-option="${i}"${qz.revealed ? ' disabled' : ''}>
+      <span class="quiz-key">${i + 1}</span><span>${esc(opt)}</span>
+    </button>`;
+  }).join('');
+
+  el.reviewArea.innerHTML = `<div class="review-card quiz-card">
+    <div class="review-progress">${progress}</div>
+    <div class="quiz-question">${esc(q.question)}</div>
+    <div class="quiz-options">${options}</div>
+    ${qz.revealed ? `
+      <div class="quiz-explain ${qz.answers[qz.answers.length - 1]?.correct ? 'is-good' : 'is-bad'}">
+        <b>${qz.answers[qz.answers.length - 1]?.correct ? '答对了' : '答错了'}</b>
+        ${q.explain ? `<span>${esc(q.explain)}</span>` : ''}
+      </div>
+      <button class="review-flip-btn" data-quiz-next>${qz.idx + 1 >= qz.questions.length ? '看结果' : '下一题'}</button>
+    ` : '<div class="review-hint">按 <kbd>1</kbd>–<kbd>4</kbd> 选答案，答完会给出解析。</div>'}
+  </div>`;
+}
+
+async function answerQuiz(option) {
+  const qz = state.quiz;
+  if (!qz || qz.revealed) return;
+  const q = qz.questions[qz.idx];
+  const correct = option === q.answer;
+  qz.selected = option;
+  qz.revealed = true;
+  qz.answers.push({ key: q.key, word: q.word, correct, chosen: option, answer: q.answer });
+  renderQuizCard();
+  setPetMode(correct ? 'happy' : 'surprised', 800);
+  try {
+    const r = await window.api.submitReview(q.key, correct ? 2 : 0);
+    if (r.ok) {
+      state.entries[q.key] = r.entry;
+      renderStats();
+    }
+  } catch {
+    /* 记录失败不打断答题 */
+  }
+}
+
+function nextQuiz() {
+  const qz = state.quiz;
+  if (!qz) return;
+  qz.idx += 1;
+  qz.selected = null;
+  qz.revealed = false;
+  if (qz.idx >= qz.questions.length) renderQuizSummary();
+  else renderQuizCard();
+}
+
+function renderQuizSummary() {
+  const qz = state.quiz;
+  if (!qz || !el.reviewArea) return;
+  const answers = qz.answers || [];
+  const right = answers.filter((a) => a.correct).length;
+  const rows = answers.map((a) => `
+    <div class="quiz-result-row ${a.correct ? 'ok' : 'bad'}">
+      <span class="quiz-mark">${a.correct ? '✓' : '×'}</span>
+      <b>${esc(a.word)}</b>
+      <span>${a.correct ? '记对了' : '下一轮再来'}</span>
+    </div>`).join('');
+  const forgot = answers.filter((a) => !a.correct).map((a) => a.word);
+  const tip = state.config?.recommendSlot && forgot.length
+    ? `<div class="review-tip">建议：明天先把 ${forgot.slice(0, 2).map((w) => `<b>${esc(w)}</b>`).join('、')} 过一遍。</div>`
+    : '';
+  el.reviewArea.innerHTML = `<div class="review-done quiz-done">
+    <img src="assets/robot-${right === answers.length ? 'happy' : 'idle'}.png" alt="">
+    <div class="review-done-title">考官结果 · ${right}/${answers.length}</div>
+    <div class="review-done-sub">答对的进入下一复习阶段，答错的明天回来。</div>
+    ${tip}
+    <div class="quiz-result-list">${rows || '<p class="review-empty-sub">这一轮没有作答。</p>'}</div>
+    <div class="quiz-done-actions">
+      <button class="review-flip-btn" data-quiz-restart>再来一轮</button>
+      <button class="btn ghost sm" data-review-back>回到回顾</button>
+    </div>
+  </div>`;
+  if (state.quiz) state.quiz.revealed = true;
+}
+
+/* ---------------- 洞察（统计 / 周报 / 本地建议） ---------------- */
+
+function chartBarHeight(v, max) {
+  if (!v) return 0;
+  return Math.max(6, Math.round((v / max) * 100));
+}
+
+function statsHTML(d) {
+  const max = Math.max(1, ...d.days.map((x) => Math.max(x.added, x.reviewed)));
+  const legend = `
+    <div class="chart-legend">
+      <span><i class="chart-dot added"></i>新增</span>
+      <span><i class="chart-dot reviewed"></i>复习</span>
+    </div>`;
+  const days = d.days.map((x) => `
+    <div class="chart-day" tabindex="0" aria-label="${esc(x.date)} 新增 ${x.added}，复习 ${x.reviewed}">
+      <span class="chart-tip">${esc(x.date)} · 新增 ${x.added} · 复习 ${x.reviewed}</span>
+      <div class="chart-bars">
+        <span class="chart-bar added" style="height:${chartBarHeight(x.added, max)}%"></span>
+        <span class="chart-bar reviewed" style="height:${chartBarHeight(x.reviewed, max)}%"></span>
+      </div>
+      <span class="chart-x">${esc(x.label)}</span>
+    </div>`).join('');
+
+  const tableRows = d.days.map((x) => `<tr><td>${esc(x.date)}</td><td>${x.added}</td><td>${x.reviewed}</td></tr>`).join('');
+
+  const tracks = d.tracks.length
+    ? d.tracks.map((t) => `
+      <div class="dist-row">
+        <span class="dist-name" title="${esc(t.name)}">${esc(t.name)}</span>
+        <span class="dist-track"><i style="width:${Math.max(3, Math.round((t.count / Math.max(1, d.tracks[0].count)) * 100))}%"></i></span>
+        <span class="dist-count">${t.count}</span>
+      </div>`).join('')
+    : '<p class="stats-note">还没有方向。可在设置里加一个，AI 会按方向解释词条。</p>';
+
+  const weak = d.weak.length
+    ? d.weak.map((w) => `<li><b>${esc(w.word)}</b><span>最近 ${w.times} 次没想起</span></li>`).join('')
+    : '<li class="stats-quiet">最近 7 天没有「没想起」的记录。</li>';
+
+  const suggestions = d.recommendSlot
+    ? `<div class="stat-block insight-block">
+        <div class="stat-block-head"><span>本地建议</span><b>${d.suggestions.length}</b></div>
+        <div class="insight-list">${d.suggestions.length
+          ? d.suggestions.map((s) => `<div class="insight-item">
+              <span class="insight-mark">›</span>
+              <p>${esc(s.text)}</p>
+              <button class="link-btn sm" data-suggest-action="${esc(s.action)}"${s.word ? ` data-suggest-word="${esc(s.word)}"` : ''}>去看看</button>
+            </div>`).join('')
+          : '<p class="stats-note">暂时没有需要调整的，按现在的节奏继续。</p>'}</div>
+        <p class="stats-foot">只根据本机复习数据生成，不含广告或画像。</p>
+      </div>`
+    : `<p class="stats-foot">本地建议默认关闭。需要时在设置里开启；建议只根据你自己的复习数据生成，不联网、不含广告。</p>`;
+
+  return `
+    <div class="stats-hero">
+      <div class="stat-tile"><b>${d.total}</b><span>收录</span></div>
+      <div class="stat-tile"><b>${d.stats.reviewedWords}</b><span>复习过</span></div>
+      <div class="stat-tile"><b>${d.stats.stable}</b><span>稳固</span></div>
+      <div class="stat-tile${d.due ? ' is-due' : ''}"><b>${d.due}</b><span>到期</span></div>
+    </div>
+    <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : d.streak ? `连续学习 <b>${d.streak}</b> 天` : '今天还没开始'} · 近 7 天新增 <b>${d.weekAdded}</b> · 复习 <b>${d.weekReviewed}</b> 次</p>
+
+    <div class="chart-card">
+      <div class="chart-head"><span class="chart-title">近 7 天</span>${legend}</div>
+      <div class="chart-plot">${days}</div>
+      ${!d.weekAdded && !d.weekReviewed ? '<p class="stats-note">这 7 天还没有新增或复习记录。</p>' : ''}
+      <details class="chart-table"><summary>看数字</summary>
+        <table><thead><tr><th>日期</th><th>新增</th><th>复习</th></tr></thead><tbody>${tableRows}</tbody></table>
+      </details>
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-block-head"><span>方向分布</span><b>${d.tracks.length}</b></div>
+      ${tracks}
+      ${d.noTrack ? `<p class="stats-note">另有 ${d.noTrack} 条未归方向。</p>` : ''}
+    </div>
+
+    <div class="stat-block">
+      <div class="stat-block-head"><span>还不稳的词</span><b>${d.weak.length}</b></div>
+      <ul class="weak-list">${weak}</ul>
+    </div>
+
+    ${suggestions}
+
+    <div class="stat-block weekly-block">
+      <div class="stat-block-head"><span>周报</span>${state.weekly?.period ? `<b>${esc(state.weekly.period.from)} → ${esc(state.weekly.period.to)}</b>` : ''}</div>
+      ${state.weekly ? weeklyHTML(state.weekly.report) : '<p class="stats-note">把这一周做了什么、哪些还不稳写成一页，写进 Obsidian 的「秒记周报.md」。</p>'}
+      <button class="btn ghost sm" data-weekly${state.weeklyBusy ? ' disabled' : ''}>${state.weeklyBusy ? '生成中…' : state.weekly ? '重新生成周报' : '生成本周周报'}</button>
+      ${state.weekly?.obsidian && state.weekly.obsidian.ok && !state.weekly.obsidian.skipped ? `<p class="stats-foot">已写入 ${esc(state.weekly.obsidian.path || 'Obsidian')}</p>` : state.weekly ? '<p class="stats-foot">Obsidian 未开启时只在当前页面显示，可在设置里开启笔记写入。</p>' : ''}
+    </div>`;
+}
+
+function weeklyHTML(report) {
+  if (!report) return '';
+  const list = (arr) => (arr && arr.length ? `<ul>${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
+  return `<div class="weekly-report">
+    <h4>${esc(report.title || '本周学习记录')}</h4>
+    ${report.summary ? `<p>${esc(report.summary)}</p>` : ''}
+    ${report.highlights && report.highlights.length ? `<div class="weekly-sec"><span class="weekly-label">做得好的</span>${list(report.highlights)}</div>` : ''}
+    ${report.weak && report.weak.length ? `<div class="weekly-sec"><span class="weekly-label">还不太稳</span>${list(report.weak)}</div>` : ''}
+    ${report.advice ? `<div class="weekly-advice"><b>下一步</b>${esc(report.advice)}</div>` : ''}
+    ${report.next ? `<p class="weekly-next">下周目标：${esc(report.next)}</p>` : ''}
+  </div>`;
+}
+
+async function renderStatsView() {
+  if (!el.statsArea) return;
+  try {
+    const r = await window.api.statsOverview();
+    if (!r.ok) {
+      el.statsArea.innerHTML = `<div class="review-empty"><div class="review-empty-title">读不到统计</div><div class="review-empty-sub">${esc(r.error || '未知错误')}</div></div>`;
+      return;
+    }
+    state.statsData = r;
+    el.statsArea.innerHTML = statsHTML(r);
+  } catch (err) {
+    el.statsArea.innerHTML = `<div class="review-empty"><div class="review-empty-title">读不到统计</div><div class="review-empty-sub">${esc(err && err.message ? err.message : err)}</div></div>`;
+  }
+}
+
+async function generateWeekly() {
+  if (state.weeklyBusy) return;
+  state.weeklyBusy = true;
+  renderStatsView();
+  try {
+    const r = await window.api.weeklyReport();
+    if (!r.ok) {
+      toast(r.error || '周报生成失败', 'warn');
+      return;
+    }
+    state.weekly = { report: r.report, period: r.period, obsidian: r.obsidian };
+    const wrote = r.obsidian && r.obsidian.ok && !r.obsidian.skipped;
+    toast(wrote ? '周报已生成并写入 Obsidian' : '周报已生成');
+  } catch (err) {
+    toast('周报生成失败：' + (err && err.message ? err.message : err), 'warn');
+  } finally {
+    state.weeklyBusy = false;
+    if (state.tab === 'stats') renderStatsView();
+  }
+}
+
+/* ---------------- 助手（Agent） ---------------- */
+
+const AGENT_STEP_LABELS = {
+  search_entries: '搜索词条',
+  save_term: '收录词条',
+  set_entry_track: '改方向',
+  list_due: '查到期',
+  submit_review: '提交复习',
+  get_stats: '看统计',
+  collect_clip_terms: '收文章术语',
+  write_weekly_report: '写周报'
+};
+
+function renderAgentLog() {
+  if (!el.agentLog) return;
+  if (!state.agentLog.length && !state.agentBusy) {
+    el.agentLog.innerHTML = `<div class="agent-empty">
+      <img src="assets/robot-idle.png" alt="">
+      <p>说一件具体的事，比如「查一下 idempotent 并放进编程方向」。</p>
+    </div>`;
+    return;
+  }
+  const msgs = state.agentLog.map((m) => {
+    if (m.role === 'user') {
+      return `<div class="agent-msg user"><span class="agent-prefix">你 ›</span><p>${esc(m.text)}</p></div>`;
+    }
+    const steps = (m.steps || []).map((s) => `<span class="agent-step${s.ok ? '' : ' is-fail'}">${esc(AGENT_STEP_LABELS[s.name] || s.name)}${s.ok ? ' ✓' : ' ×'}</span>`).join('');
+    return `<div class="agent-msg assistant${m.role === 'error' ? ' is-error' : ''}">
+      <span class="agent-prefix">小记 ›</span>
+      <div class="rich-text">${richBlock(m.text || '')}</div>
+      ${steps ? `<div class="agent-steps">${steps}</div>` : ''}
+    </div>`;
+  }).join('');
+  el.agentLog.innerHTML = msgs + (state.agentBusy
+    ? `<div class="agent-msg assistant is-busy"><span class="agent-prefix">小记 ›</span><p class="agent-thinking">正在调用工具…</p></div>`
+    : '');
+  el.agentLog.scrollTop = el.agentLog.scrollHeight;
+}
+
+function renderAgent() {
+  renderAgentLog();
+  if (el.agentInput) setTimeout(() => el.agentInput.focus(), 40);
+}
+
+async function runAgentPrompt(text) {
+  const prompt = String(text === undefined ? el.agentInput?.value : text).trim();
+  if (!prompt) {
+    toast('先说你想做什么');
+    el.agentInput?.focus();
+    return;
+  }
+  if (state.agentBusy) {
+    toast('上一个任务还在跑');
+    return;
+  }
+  state.agentLog.push({ role: 'user', text: prompt });
+  if (el.agentInput) el.agentInput.value = '';
+  state.agentBusy = true;
+  if (el.btnAgentSend) el.btnAgentSend.disabled = true;
+  renderAgentLog();
+  try {
+    const r = await window.api.runAgent(prompt);
+    state.agentLog.push({
+      role: r.ok ? 'assistant' : 'error',
+      text: r.ok ? r.answer : (r.error || '助手没有完成'),
+      steps: r.steps || []
+    });
+    if (r.ok) reloadEntries();
+    else if (r.steps && r.steps.length) reloadEntries();
+  } catch (err) {
+    state.agentLog.push({ role: 'error', text: err && err.message ? err.message : String(err), steps: [] });
+  } finally {
+    state.agentBusy = false;
+    if (el.btnAgentSend) el.btnAgentSend.disabled = false;
+    renderAgentLog();
+  }
+}
+
+
 
 /* ---------------- 查询 / 追问 ---------------- */
 
@@ -1784,6 +2223,8 @@ function switchTab(tab) {
   document.body.classList.toggle('result-view', tab === 'jot' && Boolean(state.lastResult) && !state.busy);
   if (tab === 'hot') renderHot();
   if (tab === 'review') renderReview();
+  if (tab === 'stats') renderStatsView();
+  if (tab === 'agent') renderAgent();
   if (tab === 'settings') fillSettings();
   if (tab === 'jot' && !state.lastResult) setTimeout(() => el.input.focus(), 40);
   if (tab !== 'jot') stopEmptyRobot();
@@ -1926,6 +2367,10 @@ function fillSettings() {
   el.cfgThreshold.value = state.config.hotThreshold || 3;
   el.cfgLimit.value = state.config.hotLimit || 15;
   el.cfgLaunch.checked = Boolean(state.config.launchAtLogin);
+  el.cfgClipWatch.checked = Boolean(state.config.clipWatch);
+  el.cfgClipPause.checked = Boolean(state.config.clipWatchPaused);
+  el.clipPauseRow.classList.toggle('hidden', !state.config.clipWatch);
+  el.cfgRecommend.checked = Boolean(state.config.recommendSlot);
   el.cfgReviewDaily.value = state.config.reviewDaily || 5;
   el.dataDir.textContent = state.dataDir || '—';
   el.dataDir.title = state.dataDir || '';
@@ -2233,6 +2678,71 @@ function bind() {
   bindReview();
   bindTracks();
 
+  if (el.statsArea) {
+    el.statsArea.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      if (btn.dataset.weekly !== undefined) {
+        generateWeekly();
+        return;
+      }
+      const action = btn.dataset.suggestAction;
+      if (action === 'review') switchTab('review');
+      else if (action === 'settings-tracks') switchTab('settings');
+      else if (action === 'search-weak' && btn.dataset.suggestWord) {
+        switchTab('jot');
+        state.lastResult = null;
+        el.input.value = btn.dataset.suggestWord;
+        autoGrow();
+        parse(btn.dataset.suggestWord);
+      } else {
+        switchTab('jot');
+        setTimeout(() => el.input.focus(), 40);
+      }
+    });
+  }
+
+  if (el.agentChips) {
+    el.agentChips.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-agent-prompt]');
+      if (!btn) return;
+      switchTab('agent');
+      runAgentPrompt(btn.dataset.agentPrompt);
+    });
+  }
+
+  if (el.btnAgentSend) el.btnAgentSend.addEventListener('click', () => runAgentPrompt());
+  if (el.agentInput) {
+    el.agentInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        runAgentPrompt();
+      }
+    });
+  }
+
+  // 剪贴板监听提示：气泡变成「收 xxx」，点一下才收录
+  if (el.bubble) {
+    el.bubble.addEventListener('mousedown', (e) => e.stopPropagation());
+    el.bubble.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = state.clipWatchText;
+      if (!text) return;
+      state.clipWatchText = '';
+      el.bubble.classList.remove('clipwatch');
+      clearTimeout(state.clipWatchTimer);
+      state.clipWatchTimer = 0;
+      window.api.expand();
+      setTimeout(() => {
+        switchTab('jot');
+        state.lastResult = null;
+        el.input.value = text;
+        autoGrow();
+        parse(text);
+      }, 220);
+    });
+  }
+
   el.pet.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (!state.expanded) window.api.petMenu();
@@ -2410,6 +2920,30 @@ function bind() {
       return;
     }
 
+    if (btn.dataset.collectAll !== undefined) {
+      const key = btn.dataset.collectAll;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      const label = btn.innerHTML;
+      btn.innerHTML = `${icon('i-spark')}准备收录…`;
+      window.api.collectClipTerms(key).then((r) => {
+        btn.disabled = false;
+        if (!r.ok) {
+          btn.innerHTML = label;
+          toast(r.error || '收录失败', 'warn');
+          return;
+        }
+        btn.innerHTML = `${icon('i-check')}已收 ${r.collected}/${r.total} 个术语`;
+        toast(`已把 ${r.collected} 个术语收进复习`);
+        reloadEntries();
+      }).catch((err) => {
+        btn.disabled = false;
+        btn.innerHTML = label;
+        toast('收录失败：' + (err && err.message ? err.message : err), 'warn');
+      });
+      return;
+    }
+
     if (btn.dataset.new !== undefined) {
       startNew();
     }
@@ -2549,6 +3083,43 @@ function bind() {
     }
   });
 
+  el.cfgClipWatch.addEventListener('change', async () => {
+    const on = el.cfgClipWatch.checked;
+    const r = await window.api.saveConfig({ clipWatch: on });
+    if (!r.ok) {
+      el.cfgClipWatch.checked = !on;
+      toast(r.error || '保存失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    el.clipPauseRow.classList.toggle('hidden', !on);
+    toast(on ? '已开启剪贴板监听：复制的词会出现在机器人头顶' : '已关闭剪贴板监听');
+  });
+
+  el.cfgClipPause.addEventListener('change', async () => {
+    const paused = el.cfgClipPause.checked;
+    const r = await window.api.saveConfig({ clipWatchPaused: paused });
+    if (!r.ok) {
+      el.cfgClipPause.checked = !paused;
+      toast(r.error || '保存失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    toast(paused ? '已暂停监听' : '已恢复监听');
+  });
+
+  el.cfgRecommend.addEventListener('change', async () => {
+    const on = el.cfgRecommend.checked;
+    const r = await window.api.saveConfig({ recommendSlot: on });
+    if (!r.ok) {
+      el.cfgRecommend.checked = !on;
+      toast(r.error || '保存失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    toast(on ? '已开启本地建议' : '已关闭本地建议');
+  });
+
   el.btnChoose.addEventListener('click', async () => {
     const r = await window.api.chooseFile();
     if (r.canceled) return;
@@ -2642,6 +3213,30 @@ function bind() {
     document.body.classList.remove('result-view');
     el.composerWrap.classList.remove('hidden');
     parse(payload.text);
+  });
+  window.api.on('ui:pipeline-progress', (p) => {
+    if (!p) return;
+    $$('[data-collect-all]').forEach((btn) => {
+      btn.innerHTML = `${icon('i-spark')}正在收录 ${esc(p.word || '')}（${(p.index || 0) + 1}/${p.total || 0}）`;
+    });
+  });
+  window.api.on('ui:clipwatch', (payload) => {
+    if (!payload || !payload.text || state.expanded) return;
+    state.clipWatchText = payload.text;
+    if (!el.bubble) return;
+    el.petCount.textContent = '收 ' + truncate(payload.text, 7);
+    el.bubble.classList.add('clipwatch');
+    el.bubble.classList.remove('hidden');
+    setPetMode('surprised', 900);
+    clearTimeout(state.clipWatchTimer);
+    state.clipWatchTimer = setTimeout(() => {
+      state.clipWatchTimer = 0;
+      if (state.clipWatchText === payload.text) {
+        state.clipWatchText = '';
+        el.bubble.classList.remove('clipwatch');
+        renderStats();
+      }
+    }, 12000);
   });
   window.api.on('ui:dev-query', (text) => {
     if (!text) return;

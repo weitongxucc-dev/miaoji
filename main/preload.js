@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 const send = (channel, ...args) => ipcRenderer.send(channel, ...args);
 
-const EVENTS = ['ui:expanded', 'ui:collapsed', 'ui:nav', 'ui:toast', 'ui:focus', 'ui:dev-query', 'ui:dev-followup', 'ui:dev-zone', 'ui:capture'];
+const EVENTS = ['ui:expanded', 'ui:collapsed', 'ui:nav', 'ui:toast', 'ui:focus', 'ui:dev-query', 'ui:dev-followup', 'ui:dev-zone', 'ui:capture', 'ui:clipwatch', 'ui:pipeline-progress'];
 
 contextBridge.exposeInMainWorld('api', {
   init: () => invoke('app:init'),
@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('api', {
   setEntryTrack: (key, trackId) => invoke('entry:set-track', key, trackId),
   collectTerm: (word) => invoke('term:collect', word),
   openUrl: (url) => invoke('app:open-url', url),
+  generateQuiz: (keys) => invoke('quiz:generate', keys),
+  weeklyReport: () => invoke('weekly:report'),
+  collectClipTerms: (key) => invoke('pipeline:terms', key),
+  runAgent: (text) => invoke('agent:run', text),
+  statsOverview: () => invoke('stats:overview'),
 
   openNote: () => invoke('obsidian:open'),
   syncNote: () => invoke('obsidian:sync'),

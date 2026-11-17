@@ -23,7 +23,12 @@ const DEFAULTS = {
   hotLimit: 15,
   ballPos: null,
   launchAtLogin: false,
-  alwaysOnTop: true
+  alwaysOnTop: true,
+  // 全局剪贴板监听：默认关闭，只在本机做规则匹配，不联网、不上报
+  clipWatch: false,
+  clipWatchPaused: false,
+  // 本地建议位：默认关闭，只根据本机复习数据生成，不含广告或画像
+  recommendSlot: false
 };
 
 // 复习阶梯：每次「想起来了」推进一档（天数），「没想起」回到第一档
@@ -129,7 +134,10 @@ function publicConfig() {
     hotThreshold: conf.hotThreshold,
     hotLimit: conf.hotLimit,
     launchAtLogin: conf.launchAtLogin,
-    alwaysOnTop: conf.alwaysOnTop
+    alwaysOnTop: conf.alwaysOnTop,
+    clipWatch: Boolean(conf.clipWatch),
+    clipWatchPaused: Boolean(conf.clipWatchPaused),
+    recommendSlot: Boolean(conf.recommendSlot)
   };
 }
 

@@ -148,6 +148,37 @@ const CLIP_PROMPT = `你是「秒记」的阅读助手。用户会给你一个�
 }
 要求：terms 最多 12 个，优先选对理解全文关键的术语，不要选常见词；不要编造正文里没有的内容；只输出 JSON；中文用简体。`;
 
+const QUIZ_PROMPT = `你是「秒记」的复习出题老师。用户会给你一批已经收录的词条，每项包含 word、kind、meaning（释义或摘要）和 extra（可选：文中术语/要点）。
+请为每个词条出一道中文单选题，输出一个 JSON 对象：
+{
+  "questions": [
+    {
+      "word": "对应的词条原文",
+      "question": "题干，中文提问，不要泄露答案",
+      "options": ["选项1", "选项2", "选项3", "选项4"],
+      "answer": 0,
+      "explain": "一句话解析，不超过 40 字"
+    }
+  ]
+}
+要求：
+- 每个词条一题，顺序与输入一致；options 必须 4 个；answer 是正确项的下标（0-3）。
+- 干扰项要像真的：同领域、近义或常见误解，不要用明显荒谬的选项。
+- 题干要考理解，不是背英文拼写；可以是释义辨析、使用场景、和易混概念的区别。
+- 只输出 JSON，中文用简体。`;
+
+const REPORT_PROMPT = `你是「秒记」的学习教练。用户会给你过去 7 天的学习数据（JSON）：新增词条、复习记录、方向分布、到期与稳固情况。
+请写一份简短、诚实、具体的中文周报，输出一个 JSON 对象：
+{
+  "title": "本周标题，不超过 18 字，可以带一点情绪但不要浮夸",
+  "summary": "3 到 4 句：这周实际做了什么，不要夸大",
+  "highlights": ["2 到 3 条值得肯定的具体事实，引用数字或词条名"],
+  "weak": ["1 到 3 条还不稳的地方，直接说，不绕弯"],
+  "advice": "2 句话以内的下一步建议，具体到动作（复习几个、补哪个方向、别再做什么）",
+  "next": "下一周的一句话目标"
+}
+要求：只根据数据说话，不编造；如果数据很少，就直说「这周刚起步」；只输出 JSON。`;
+
 const FOLLOWUP_PROMPT = `你是「秒记」的英语词典助教。用户正在追问一个已经记录过的词条或句子。
 你会收到词条上下文和之前的追问记录。请基于这些内容回答当前问题。
 要求：
@@ -171,7 +202,7 @@ function extractJson(text) {
   return JSON.parse(s.slice(start, end + 1));
 }
 
-async function callChat(messages, config, { maxTokens = 1500, temperature = 0.2, json = true } = {}) {
+async function callChat(messages, config, { maxTokens = 1500, temperature = 0.2, json = true, tools = null, raw = false } = {}) {
   const apiKey = String(config.apiKey || '').trim();
   if (!apiKey) {
     throw new Error('还没有填写 DeepSeek API Key。打开「设置」填入后即可使用。');
@@ -188,6 +219,10 @@ async function callChat(messages, config, { maxTokens = 1500, temperature = 0.2,
     stream: false
   };
   if (json) body.response_format = { type: 'json_object' };
+  if (tools && tools.length) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);
@@ -229,7 +264,10 @@ async function callChat(messages, config, { maxTokens = 1500, temperature = 0.2,
   }
   if (!data) throw new Error('接口返回内容无法解析');
 
-  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  const message = data.choices && data.choices[0] && data.choices[0].message;
+  if (!message) throw new Error('接口没有返回内容');
+  if (raw) return message;
+  const content = message.content;
   if (!content) throw new Error('接口没有返回内容');
   return content;
 }
@@ -523,6 +561,77 @@ async function lookupZh(text, config) {
     { maxTokens: 1600, temperature: 0.3, json: true }
   );
   return normalizeLookup(extractJson(content), text);
+}
+
+/** 为一批词条出单选题 */
+function normalizeQuestions(raw, entries) {
+  const byWord = new Map(entries.map((e) => [String(e.word || ''), e]));
+  const list = cleanArr(raw && raw.questions)
+    .map((q) => {
+      if (!q || typeof q !== 'object') return null;
+      const entry = byWord.get(String(q.word || ''));
+      const options = cleanArr(q.options).map((x) => cleanStr(x)).filter(Boolean).slice(0, 4);
+      const answer = Number(q.answer);
+      if (!entry || options.length !== 4 || !Number.isInteger(answer) || answer < 0 || answer > 3) return null;
+      return {
+        key: entry.key,
+        word: entry.word,
+        question: cleanStr(q.question) || `「${entry.word}」最准确的理解是？`,
+        options,
+        answer,
+        explain: cleanStr(q.explain)
+      };
+    })
+    .filter(Boolean);
+  if (!list.length) throw new Error('AI 没有生成有效的题目，请重试');
+  return list;
+}
+
+async function makeQuiz(entries, config) {
+  if (process.env.MIAOJI_MOCK === '1') {
+    await new Promise((r) => setTimeout(r, 700));
+    return mockQuiz(entries);
+  }
+  const material = entries.map((e) => ({
+    word: e.word,
+    kind: e.kind,
+    meaning: e.meaning_zh || e.sentence_translation || e.summary || '',
+    extra: (e.terms || []).map((t) => t.word).slice(0, 4).join('、')
+  }));
+  const content = await callChat(
+    [
+      { role: 'system', content: QUIZ_PROMPT },
+      { role: 'user', content: JSON.stringify(material) }
+    ],
+    config,
+    { maxTokens: 2500, temperature: 0.4, json: true }
+  );
+  return normalizeQuestions(extractJson(content), entries);
+}
+
+/** 生成一周学习报告 */
+async function weeklyReport(data, config) {
+  if (process.env.MIAOJI_MOCK === '1') {
+    await new Promise((r) => setTimeout(r, 700));
+    return mockReport(data);
+  }
+  const content = await callChat(
+    [
+      { role: 'system', content: REPORT_PROMPT },
+      { role: 'user', content: JSON.stringify(data) }
+    ],
+    config,
+    { maxTokens: 1200, temperature: 0.5, json: true }
+  );
+  const raw = extractJson(content);
+  return {
+    title: cleanStr(raw.title) || '本周学习记录',
+    summary: cleanStr(raw.summary),
+    highlights: strList(raw.highlights, 4),
+    weak: strList(raw.weak, 4),
+    advice: cleanStr(raw.advice),
+    next: cleanStr(raw.next)
+  };
 }
 
 function entryContext(entry) {
@@ -826,12 +935,54 @@ function mockLookup(text) {
   };
 }
 
+function mockQuiz(entries) {
+  const fills = ['一种只在口语里出现的感叹', '与这段话主题无关的常见词', '表示数量增加的统计说法', '另一个领域里的相近概念'];
+  return entries.map((e, i) => {
+    const correct = e.meaning_zh || e.sentence_translation || e.summary || `与「${e.word}」相关的含义`;
+    const opts = [correct]
+      .concat(entries.filter((_, j) => j !== i).slice(0, 3).map((x) => x.meaning_zh || x.summary || `与「${x.word}」有关的含义`));
+    while (opts.length < 4) opts.push(fills[opts.length - 1] || '以上都不是');
+    const shift = i % 4;
+    const rotated = opts.map((_, k) => opts[(k + shift) % 4]);
+    const answer = (4 - shift) % 4;
+    return {
+      key: e.key,
+      word: e.word,
+      question: `（测试题）下面哪一项最准确地解释「${e.word}」？`,
+      options: rotated,
+      answer,
+      explain: '（测试数据）这是模拟出题，用来验证考试流程。'
+    };
+  });
+}
+
+function mockReport(data) {
+  const added = (data && data.added && data.added.length) || 0;
+  const reviews = (data && data.reviewCount) || 0;
+  return {
+    title: '刚起步的一周',
+    summary: `（测试周报）这周新增 ${added} 条记录，完成 ${reviews} 次复习。数据还不多，先把节奏跑起来，比一次记很多更重要。`,
+    highlights: [
+      `新增 ${added} 条记录`,
+      `复习 ${reviews} 次`,
+      '已经开始按方向积累'
+    ],
+    weak: reviews < 10 ? ['复习次数偏少，很多词还没回到眼前'] : [],
+    advice: '明天先把到期的词过一遍，再补一条新记录。',
+    next: '下周保持每天 5 个复习。'
+  };
+}
+
 module.exports = {
   askDeepSeek,
   askFollowUp,
   summarizeClip,
   cleanNote,
   lookupZh,
+  makeQuiz,
+  weeklyReport,
+  callChat,
+  extractJson,
   normalizeEntry,
   normalizeFollowUp,
   testConnection

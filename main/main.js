@@ -66,8 +66,10 @@ if (!ENV_DATA_DIR && DATA_DIR !== OLD_USER_DATA) {
 }
 
 const store = require('./store');
-const { askDeepSeek, askFollowUp, testConnection, summarizeClip, cleanNote, lookupZh } = require('./ai');
+const { askDeepSeek, askFollowUp, testConnection, summarizeClip, cleanNote, lookupZh, makeQuiz, weeklyReport } = require('./ai');
 const obsidian = require('./obsidian');
+const agent = require('./agent');
+const stats = require('./stats');
 
 const PET_W = 128;
 const PET_H = 152;
@@ -424,13 +426,13 @@ async function captureSelection() {
     text = '';
   }
   if (!text) {
-    const prev = clipboard.readText();
+    const prev = await Promise.resolve(clipboard.readText());
     try {
       simulateCopy();
       await new Promise((r) => setTimeout(r, 200));
-      const copied = clipboard.readText();
+      const copied = await Promise.resolve(clipboard.readText());
       if (copied && copied !== prev) text = copied;
-      clipboard.writeText(prev || '');
+      await Promise.resolve(clipboard.writeText(prev || ''));
     } catch {
       text = '';
     }
@@ -441,6 +443,58 @@ async function captureSelection() {
   setTimeout(() => {
     if (win && !win.isDestroyed()) win.webContents.send('ui:capture', { text, source: 'selection' });
   }, 160);
+}
+
+/* ---------------- 全局剪贴板监听（opt-in） ---------------- */
+
+let clipTimer = null;
+let lastClipSeen = '';
+
+/** 只匹配「像要查的东西」：单个词、2–3 个词的短语、2–16 个汉字的术语 */
+function looksLikeCaptureText(text) {
+  const t = String(text || '').trim();
+  if (!t || t.length > 60 || /[\r\n]/.test(t)) return false;
+  if (/^https?:\/\//i.test(t)) return false;
+  if (t.includes('@')) return false;
+  if (/^[A-Za-z][A-Za-z'’-]*(?:\s+[A-Za-z][A-Za-z'’-]*){0,3}$/.test(t)) return true;
+  if (/^[一-龥]{2,16}$/.test(t)) return true;
+  return false;
+}
+
+async function clipWatchTick() {
+  const conf = store.loadConfig();
+  if (!conf.clipWatch || conf.clipWatchPaused) return;
+  if (!win || win.isDestroyed() || expanded || win.isFocused()) return;
+  let text = '';
+  try {
+    text = String((await clipboard.readText()) || '').trim();
+  } catch {
+    return;
+  }
+  if (!text || text === lastClipSeen) return;
+  lastClipSeen = text;
+  if (!looksLikeCaptureText(text)) return;
+  win.webContents.send('ui:clipwatch', { text });
+}
+
+function syncClipWatch() {
+  const conf = store.loadConfig();
+  const shouldRun = Boolean(conf.clipWatch) && !conf.clipWatchPaused;
+  if (!shouldRun) {
+    if (clipTimer) clearInterval(clipTimer);
+    clipTimer = null;
+    return;
+  }
+  if (clipTimer) return;
+  // 启动时先记住当前剪贴板，避免把旧内容当成新复制
+  Promise.resolve(clipboard.readText())
+    .then((t) => {
+      lastClipSeen = String(t || '').trim();
+    })
+    .catch(() => {
+      lastClipSeen = '';
+    });
+  clipTimer = setInterval(clipWatchTick, 2500);
 }
 
 /* ---------------- IPC ---------------- */
@@ -469,12 +523,13 @@ ipcMain.handle('app:init', () => {
 
 ipcMain.handle('config:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') return { ok: false, error: '参数错误' };
-  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'tracks', 'reviewDaily', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop'];
+  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'tracks', 'reviewDaily', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop', 'clipWatch', 'clipWatchPaused', 'recommendSlot'];
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k];
   const config = store.saveConfig(clean);
   if ('launchAtLogin' in clean) applyLaunchAtLogin(clean.launchAtLogin);
   if ('alwaysOnTop' in clean && win) win.setAlwaysOnTop(Boolean(clean.alwaysOnTop), 'floating');
+  if ('clipWatch' in clean || 'clipWatchPaused' in clean) syncClipWatch();
   if (tray) buildTrayMenu();
   return { ok: true, config };
 });
@@ -522,7 +577,7 @@ ipcMain.handle('ai:test', async () => {
   }
 });
 
-ipcMain.handle('clipboard:read', () => clipboard.readText() || '');
+ipcMain.handle('clipboard:read', async () => (await clipboard.readText()) || '');
 
 ipcMain.handle('ai:query', async (_e, text, mode) => {
   const input = String(text || '').trim();
@@ -611,6 +666,84 @@ ipcMain.handle('review:submit', (_e, key, grade) => {
       write = { ok: false, error: err && err.message ? err.message : String(err) };
     }
     return { ok: true, entry, obsidian: write };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('quiz:generate', async (_e, keys) => {
+  try {
+    const conf = store.loadConfig();
+    const wanted = Array.isArray(keys) ? keys.map(String).filter(Boolean) : [];
+    const all = store.listEntries();
+    let list = wanted.length ? wanted.map((k) => all.find((x) => x.key === k)).filter(Boolean) : [];
+    if (!list.length) {
+      const state = store.reviewState(conf.reviewDaily);
+      list = state.due.slice(0, conf.reviewDaily).map((k) => all.find((x) => x.key === k)).filter(Boolean);
+    }
+    list = list.slice(0, 8);
+    if (!list.length) return { ok: false, error: '还没有可出题的词条' };
+    const questions = await makeQuiz(list, conf);
+    return { ok: true, questions, keys: list.map((x) => x.key) };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('weekly:report', async () => {
+  try {
+    const conf = store.loadConfig();
+    const data = agent.weekData();
+    if (!data.added.length && !data.reviewCount) {
+      return { ok: false, error: '这周还没有学习记录，先收几个词再来生成周报' };
+    }
+    const report = await weeklyReport(data, conf);
+    let write = { ok: true, skipped: true, path: '' };
+    try {
+      write = obsidian.writeWeekly(report, conf, data.period);
+    } catch (err) {
+      write = { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+    return { ok: true, report, period: data.period, obsidian: write, stats: data };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('pipeline:terms', async (_e, key) => {
+  const k = String(key || '').trim();
+  if (!k) return { ok: false, error: '缺少词条' };
+  try {
+    const notify = (p) => {
+      if (win && !win.isDestroyed()) win.webContents.send('ui:pipeline-progress', p);
+    };
+    const result = await agent.collectClipTerms(k, 8, notify);
+    return result;
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('agent:run', async (_e, text) => {
+  try {
+    const conf = store.loadConfig();
+    const result = await agent.runAgent(text, conf);
+    return result;
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('stats:overview', () => {
+  try {
+    const conf = store.loadConfig();
+    const data = stats.overview();
+    return {
+      ok: true,
+      ...data,
+      suggestions: conf.recommendSlot ? stats.suggestions(data, conf) : [],
+      recommendSlot: Boolean(conf.recommendSlot)
+    };
   } catch (err) {
     return { ok: false, error: err && err.message ? err.message : String(err) };
   }
@@ -789,6 +922,7 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   registerShortcut();
+  syncClipWatch();
 
   let conf = store.loadConfig();
   if (conf.launchAtLogin) applyLaunchAtLogin(true);
@@ -816,4 +950,5 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  if (clipTimer) clearInterval(clipTimer);
 });

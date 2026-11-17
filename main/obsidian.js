@@ -456,4 +456,80 @@ function syncAll(entries, config) {
   return { ok: true, path: file, created: true };
 }
 
-module.exports = { upsert, update, remove, syncAll, baseDoc };
+function weekMarkers(period) {
+  const tag = `${period && period.to ? period.to : fmt(new Date().toISOString(), false)}`;
+  return {
+    start: `<!-- sm:week:${tag} -->`,
+    end: `<!-- /sm:week:${tag} -->`
+  };
+}
+
+function weeklyBaseDoc() {
+  return `---
+title: 秒记周报
+tags:
+  - 秒记
+  - 周报
+---
+
+# 🗓 秒记周报
+
+> 由「秒记」根据本机学习记录生成，只在本地写入，不上传任何地方。
+> 每周一份，重新生成同一周会更新这一周的块，不覆盖更早的周报。
+`;
+}
+
+/**
+ * 写周报到与生词本同目录的「秒记周报.md」。同一周重复生成时原地更新。
+ * report 由 ai.weeklyReport 生成；period 为 { from, to }。
+ */
+function writeWeekly(report, config, period) {
+  const note = noteFile(config);
+  if (!note) return { ok: true, skipped: true, path: '' };
+  const file = path.join(path.dirname(note), '秒记周报.md');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const existing = readDoc(file);
+  let doc = existing === null ? weeklyBaseDoc() : existing;
+
+  const p = period || {};
+  const label = p.to || fmt(new Date().toISOString(), false);
+  const { start, end } = weekMarkers({ to: label });
+  const lines = [start, '', `## ${label} · ${cell(report.title || '本周学习记录')}`, ''];
+  if (p.from || p.to) lines.push(`> 📅 周期：${p.from || '—'} → ${p.to || '—'}`, '');
+  if (report.summary) {
+    lines.push(cell(report.summary), '');
+  }
+  if (report.highlights && report.highlights.length) {
+    lines.push('**做得好的**', '');
+    report.highlights.forEach((h) => lines.push(`- ${cell(h)}`));
+    lines.push('');
+  }
+  if (report.weak && report.weak.length) {
+    lines.push('**还不太稳**', '');
+    report.weak.forEach((w) => lines.push(`- ${cell(w)}`));
+    lines.push('');
+  }
+  if (report.advice) {
+    lines.push(`> [!tip] 下一步`, `> ${cell(report.advice)}`);
+    if (report.next) lines.push(`>`, `> **下周目标**：${cell(report.next)}`);
+    lines.push('');
+  }
+  lines.push(end);
+
+  const block = lines.join('\n');
+  const i = doc.indexOf(start);
+  if (i !== -1) {
+    const j = doc.indexOf(end, i + start.length);
+    if (j !== -1) {
+      doc = doc.slice(0, i) + block + doc.slice(j + end.length);
+    } else {
+      doc = doc.slice(0, i) + block;
+    }
+  } else {
+    doc = doc.replace(/\s+$/, '') + '\n\n' + block + '\n';
+  }
+  writeDoc(file, doc);
+  return { ok: true, path: file, created: existing === null };
+}
+
+module.exports = { upsert, update, remove, syncAll, baseDoc, writeWeekly };
