@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('api', {
   testApi: () => invoke('ai:test'),
   saveConfig: (patch) => invoke('config:save', patch),
   chooseFile: () => invoke('config:choose-file'),
+  detectObsidian: () => invoke('obsidian:detect'),
+  useVault: (vaultPath) => invoke('obsidian:use-vault', vaultPath),
+  openObsidianDownload: () => invoke('app:open-obsidian-download'),
   setLaunch: (enabled) => invoke('app:launch-at-login', enabled),
   readClipboard: () => invoke('clipboard:read'),
 

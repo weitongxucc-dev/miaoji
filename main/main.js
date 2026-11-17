@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, screen, clipboard, shell, dialog, Tray, Menu, globalShortcut, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { detectObsidian, DOWNLOAD_URL } = require('./obsidian-detect');
 
 /*
  * 数据默认放在 D:\秒记数据，避免占用 C 盘。
@@ -262,7 +263,7 @@ function findVaultRoot(file) {
 async function openObsidianNote() {
   const conf = store.loadConfig();
   const file = conf.obsidianFile;
-  if (!file) return { ok: false, error: '还没有设置笔记路径' };
+  if (!file) return { ok: false, error: '还没有设置 Obsidian 生词本，去「设置 → 笔记」里选择库或文件' };
   const root = findVaultRoot(file);
   if (root) {
     const rel = path.relative(root, file).replace(/\\/g, '/').replace(/\.md$/i, '');
@@ -402,7 +403,7 @@ ipcMain.handle('app:init', () => {
 
 ipcMain.handle('config:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') return { ok: false, error: '参数错误' };
-  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop'];
+  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop'];
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k];
   const config = store.saveConfig(clean);
@@ -422,8 +423,27 @@ ipcMain.handle('config:choose-file', async () => {
     properties: ['createDirectory']
   });
   if (res.canceled || !res.filePath) return { canceled: true };
-  const config = store.saveConfig({ obsidianFile: res.filePath });
+  const config = store.saveConfig({ obsidianFile: res.filePath, obsidianEnabled: true, obsidianOnboarded: true });
   return { canceled: false, config };
+});
+
+ipcMain.handle('obsidian:detect', () => detectObsidian());
+
+ipcMain.handle('obsidian:use-vault', (_e, vaultPath) => {
+  const dir = String(vaultPath || '').trim();
+  if (!dir || !fs.existsSync(dir)) return { ok: false, error: '找不到这个库目录，可能已经被移动' };
+  const file = path.join(dir, '秒记', '生词本.md');
+  const config = store.saveConfig({ obsidianFile: file, obsidianEnabled: true, obsidianOnboarded: true });
+  return { ok: true, config };
+});
+
+ipcMain.handle('app:open-obsidian-download', async () => {
+  try {
+    await shell.openExternal(DOWNLOAD_URL);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
 });
 
 ipcMain.handle('ai:test', async () => {

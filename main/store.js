@@ -6,14 +6,17 @@ const { app, safeStorage } = require('electron');
 
 const DIR = process.env.MIAOJI_DATA_DIR
   ? path.resolve(process.env.MIAOJI_DATA_DIR)
-  : app.getPath('userData');const CONFIG_FILE = path.join(DIR, 'config.json');
+  : app.getPath('userData');
+const CONFIG_FILE = path.join(DIR, 'config.json');
 const ENTRIES_FILE = path.join(DIR, 'entries.json');
 
 const DEFAULTS = {
   apiKey: '',
   baseUrl: 'https://api.deepseek.com',
   model: 'deepseek-chat',
-  obsidianFile: 'D:\\Obsdian\\知识库\\秒记\\生词本.md',
+  obsidianFile: '',
+  obsidianEnabled: false,
+  obsidianOnboarded: false,
   hotThreshold: 3,
   hotLimit: 15,
   ballPos: null,
@@ -54,7 +57,16 @@ function loadConfig() {
   delete conf.apiKeyEnc;
 
   // 开发/测试时可用环境变量指向临时生词本，避免污染真实库
-  if (process.env.MIAOJI_VAULT_FILE) conf.obsidianFile = path.resolve(process.env.MIAOJI_VAULT_FILE);
+  if (process.env.MIAOJI_VAULT_FILE) {
+    conf.obsidianFile = path.resolve(process.env.MIAOJI_VAULT_FILE);
+    conf.obsidianEnabled = true;
+  }
+
+  // 旧版本配置没写开关：有笔记路径就视为开启
+  if (file.obsidianEnabled === undefined) {
+    conf.obsidianEnabled = Boolean(String(conf.obsidianFile || '').trim());
+  }
+  conf.obsidianEnabled = Boolean(conf.obsidianEnabled) && Boolean(String(conf.obsidianFile || '').trim());
 
   configCache = conf;
   return conf;
@@ -71,7 +83,9 @@ function saveConfig(patch) {
   conf.hotLimit = Math.max(1, Math.min(50, Math.round(Number(conf.hotLimit) || DEFAULTS.hotLimit)));
   conf.baseUrl = String(conf.baseUrl || DEFAULTS.baseUrl).trim() || DEFAULTS.baseUrl;
   conf.model = String(conf.model || DEFAULTS.model).trim() || DEFAULTS.model;
-  conf.obsidianFile = String(conf.obsidianFile || DEFAULTS.obsidianFile).trim() || DEFAULTS.obsidianFile;
+  conf.obsidianFile = String(conf.obsidianFile || '').trim();
+  conf.obsidianEnabled = Boolean(conf.obsidianEnabled) && Boolean(conf.obsidianFile);
+  conf.obsidianOnboarded = Boolean(conf.obsidianOnboarded);
 
   configCache = conf;
 
@@ -92,6 +106,8 @@ function publicConfig() {
     baseUrl: conf.baseUrl,
     model: conf.model,
     obsidianFile: conf.obsidianFile,
+    obsidianEnabled: conf.obsidianEnabled,
+    obsidianOnboarded: conf.obsidianOnboarded,
     hotThreshold: conf.hotThreshold,
     hotLimit: conf.hotLimit,
     launchAtLogin: conf.launchAtLogin,

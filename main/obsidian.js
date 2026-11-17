@@ -288,9 +288,14 @@ function readDoc(file) {
   }
 }
 
+function noteFile(config) {
+  if (!config || config.obsidianEnabled === false) return '';
+  return String(config.obsidianFile || '').trim();
+}
+
 function ensureDoc(config) {
-  const file = config.obsidianFile;
-  if (!file) throw new Error('还没有设置 Obsidian 生词本路径');
+  const file = noteFile(config);
+  if (!file) throw new Error('还没有启用 Obsidian 生词本');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const existing = readDoc(file);
   if (existing === null) {
@@ -309,7 +314,8 @@ function writeDoc(file, doc) {
  * 写入或更新一个词条，并同步热词榜。
  */
 function upsert(entry, entries, config) {
-  const file = config.obsidianFile;
+  const file = noteFile(config);
+  if (!file) return { ok: true, skipped: true, path: '', created: false };
   const { doc: rawDoc, created } = ensureDoc(config);
   let doc = ensureHotMarkers(rawDoc);
   doc = writeHot(doc, entries, config);
@@ -330,7 +336,8 @@ function update(entry, entries, config) {
 }
 
 function remove(key, entries, config) {
-  const file = config.obsidianFile;
+  const file = noteFile(config);
+  if (!file) return { ok: true, skipped: true, path: '', created: false };
   const rawDoc = readDoc(file);
   if (rawDoc === null) return { ok: true, path: file, created: false };
   let doc = ensureHotMarkers(rawDoc);
@@ -344,8 +351,8 @@ function remove(key, entries, config) {
  * 按本地记录重新生成整篇笔记（会保留文件头部之外的人工内容？不会——这是一次全量重建）。
  */
 function syncAll(entries, config) {
-  const file = config.obsidianFile;
-  if (!file) throw new Error('还没有设置 Obsidian 生词本路径');
+  const file = noteFile(config);
+  if (!file) throw new Error('还没有设置或启用 Obsidian 生词本');
   fs.mkdirSync(path.dirname(file), { recursive: true });
 
   let doc = baseDoc();

@@ -30,6 +30,12 @@ const el = {
   cfgBase: $('#cfgBase'),
   cfgModel: $('#cfgModel'),
   cfgFile: $('#cfgFile'),
+  cfgVault: $('#cfgVault'),
+  obsStatus: $('#obsStatus'),
+  btnObsDetect: $('#btnObsDetect'),
+  cfgObsidianOn: $('#cfgObsidianOn'),
+  btnGetObsidian: $('#btnGetObsidian'),
+  vaultField: $('#vaultField'),
   cfgThreshold: $('#cfgThreshold'),
   cfgLimit: $('#cfgLimit'),
   cfgLaunch: $('#cfgLaunch'),
@@ -63,7 +69,11 @@ const state = {
   pendingQ: '',
   lastFollowQuestion: '',
   followError: '',
-  devFollowup: ''
+  devFollowup: '',
+  obsDetect: null,
+  obsDetectAt: 0,
+  onboardPending: false,
+  onboardShown: false
 };
 
 /* ---------------- 工具 ---------------- */
@@ -1360,6 +1370,7 @@ function setExpanded(v) {
     setHeadAvatar(state.busy || state.followBusy ? 'think' : 'idle');
     refreshClipboard(true);
     if (!state.lastResult) setTimeout(() => el.input.focus(), 100);
+    maybeOnboardObsidian();
   } else {
     closeModal();
     setHeadAvatar('idle');
@@ -1382,6 +1393,7 @@ function switchTab(tab) {
 function closeModal() {
   el.modal.classList.add('hidden');
   el.modalCard.innerHTML = '';
+  el.modal.dataset.key = '';
 }
 
 function openDetail(entry) {
@@ -1412,12 +1424,105 @@ async function openNote() {
 
 /* ---------------- 设置 ---------------- */
 
+async function refreshObsidianDetect(force = false) {
+  if (!el.obsStatus) return;
+  if (!force && state.obsDetect && Date.now() - state.obsDetectAt < 30000) {
+    renderObsDetect();
+    return;
+  }
+  el.obsStatus.textContent = '正在检测 Obsidian…';
+  el.obsStatus.classList.remove('warn');
+  try {
+    state.obsDetect = await window.api.detectObsidian();
+  } catch {
+    state.obsDetect = { installed: false, vaults: [] };
+  }
+  state.obsDetectAt = Date.now();
+  renderObsDetect();
+}
+
+function renderObsDetect() {
+  const d = state.obsDetect || { installed: false, vaults: [] };
+  const vaults = Array.isArray(d.vaults) ? d.vaults : [];
+  el.obsStatus.textContent = d.installed
+    ? `已检测到 Obsidian${vaults.length ? ` · ${vaults.length} 个库` : '（还没有库）'}`
+    : '未检测到 Obsidian';
+  el.obsStatus.classList.toggle('warn', !d.installed);
+  el.btnGetObsidian.classList.toggle('hidden', Boolean(d.installed));
+  el.vaultField.classList.toggle('hidden', vaults.length === 0);
+
+  const cur = String(state.config?.obsidianFile || '');
+  const match = vaults.find((v) => cur.toLowerCase().startsWith(String(v.path).toLowerCase()));
+  const opts = vaults.map((v) => `
+    <option value="${esc(v.path)}">${esc(v.path)}${v.open ? '（当前打开）' : ''}</option>`);
+  if (!match) {
+    opts.unshift(`<option value="">${cur ? '（当前使用下方自定义路径）' : '选择一个库…'}</option>`);
+  }
+  el.cfgVault.innerHTML = opts.join('');
+  el.cfgVault.value = match ? match.path : '';
+}
+
+async function maybeOnboardObsidian() {
+  const c = state.config;
+  if (!c || state.onboardShown || c.obsidianOnboarded || c.obsidianFile) return;
+  if (!state.expanded) {
+    state.onboardPending = true;
+    return;
+  }
+  state.onboardPending = false;
+  state.onboardShown = true;
+  await refreshObsidianDetect(true);
+  showObsidianOnboard();
+}
+
+function showObsidianOnboard() {
+  const d = state.obsDetect || { installed: false, vaults: [] };
+  const vaults = Array.isArray(d.vaults) ? d.vaults : [];
+  const vaultList = vaults.map((v) => `
+    <button class="onboard-vault" data-obs-vault="${esc(v.path)}">
+      ${icon('i-book')}<span>${esc(v.path)}</span>${v.open ? '<em>当前打开</em>' : ''}
+    </button>`).join('');
+
+  let body = '';
+  if (!d.installed) {
+    body = `<p class="modal-sub">没有检测到 Obsidian。秒记可以先独立使用，词条保存在本机；之后装了 Obsidian 再回来开启。</p>`;
+  } else if (!vaults.length) {
+    body = `<p class="modal-sub">检测到 Obsidian，但还没有库。先在 Obsidian 里创建一个库，再回来点「重新检测」。</p>`;
+  } else {
+    body = `<p class="modal-sub">找到 Obsidian。选一个库，笔记会写到「库\\秒记\\生词本.md」。</p>
+      <div class="onboard-list">${vaultList}</div>`;
+  }
+
+  el.modalCard.innerHTML = `
+    <div class="modal-head">
+      <h3>笔记写到哪？</h3>
+      <button class="icon-btn" data-obs-later aria-label="稍后">${icon('i-x')}</button>
+    </div>
+    ${body}
+    <div class="modal-actions">
+      ${d.installed ? '' : `<button class="btn ghost" data-obs-download>${icon('i-open')}下载 Obsidian</button>`}
+      <button class="btn ghost" data-obs-redetect>${icon('i-repeat')}重新检测</button>
+      <button class="btn primary" data-obs-later>先不用 Obsidian</button>
+    </div>
+    <p class="modal-note">不用 Obsidian 也能查词；热词和追问记录都在秒记本地。</p>`;
+  el.modal.dataset.key = '';
+  el.modal.classList.remove('hidden');
+}
+
+async function finishObsidianOnboard() {
+  const r = await window.api.saveConfig({ obsidianOnboarded: true, obsidianEnabled: false });
+  if (r.ok) state.config = r.config;
+  closeModal();
+  toast('先存本地，之后可在设置里开启 Obsidian');
+}
+
 function fillSettings() {
   if (!state.config) return;
   el.cfgKey.value = state.config.apiKey || '';
   el.cfgBase.value = state.config.baseUrl || '';
   el.cfgModel.value = state.config.model || '';
   el.cfgFile.value = state.config.obsidianFile || '';
+  el.cfgObsidianOn.checked = Boolean(state.config.obsidianEnabled);
   el.cfgThreshold.value = state.config.hotThreshold || 3;
   el.cfgLimit.value = state.config.hotLimit || 15;
   el.cfgLaunch.checked = Boolean(state.config.launchAtLogin);
@@ -1425,6 +1530,7 @@ function fillSettings() {
   el.dataDir.title = state.dataDir || '';
   el.installDir.textContent = state.installDir || '—';
   el.installDir.title = state.installDir || '';
+  refreshObsidianDetect();
 }
 
 async function saveSettings(showFeedback = true) {
@@ -1766,6 +1872,36 @@ function bind() {
     }
     const btn = e.target.closest('button');
     if (!btn) return;
+    if (btn.dataset.obsLater !== undefined) {
+      finishObsidianOnboard();
+      return;
+    }
+    if (btn.dataset.obsDownload !== undefined) {
+      window.api.openObsidianDownload();
+      return;
+    }
+    if (btn.dataset.obsRedetect !== undefined) {
+      btn.disabled = true;
+      refreshObsidianDetect(true).then(() => {
+        showObsidianOnboard();
+        if (state.obsDetect && state.obsDetect.installed) toast('检测完成');
+        else toast('还是没有检测到 Obsidian', 'warn');
+      });
+      return;
+    }
+    if (btn.dataset.obsVault !== undefined) {
+      window.api.useVault(btn.dataset.obsVault).then((r) => {
+        if (!r.ok) {
+          toast(r.error || '设置失败', 'warn');
+          return;
+        }
+        state.config = r.config;
+        closeModal();
+        fillSettings();
+        toast('笔记会写到所选库的「秒记\\生词本.md」');
+      });
+      return;
+    }
     if (btn.dataset.close !== undefined) {
       closeModal();
       return;
@@ -1835,8 +1971,49 @@ function bind() {
     const r = await window.api.chooseFile();
     if (r.canceled) return;
     state.config = r.config;
-    el.cfgFile.value = r.config.obsidianFile;
+    fillSettings();
     toast('已切换生词本文件');
+  });
+
+  el.btnObsDetect.addEventListener('click', async () => {
+    await refreshObsidianDetect(true);
+    toast(state.obsDetect?.installed ? '检测完成' : '没有检测到 Obsidian', state.obsDetect?.installed ? '' : 'warn');
+  });
+
+  el.btnGetObsidian.addEventListener('click', () => window.api.openObsidianDownload());
+
+  el.cfgVault.addEventListener('change', async () => {
+    const dir = el.cfgVault.value;
+    if (!dir) return;
+    const r = await window.api.useVault(dir);
+    if (!r.ok) {
+      toast(r.error || '设置失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    fillSettings();
+    toast('笔记会写到所选库的「秒记\\生词本.md」');
+  });
+
+  el.cfgObsidianOn.addEventListener('change', async () => {
+    const on = el.cfgObsidianOn.checked;
+    if (on && !state.config?.obsidianFile) {
+      el.cfgObsidianOn.checked = false;
+      await refreshObsidianDetect(true);
+      const vaults = state.obsDetect?.vaults || [];
+      if (vaults.length) showObsidianOnboard();
+      else toast('先选择一个 Obsidian 库，或手动选择生词本文件', 'warn');
+      return;
+    }
+    const r = await window.api.saveConfig({ obsidianEnabled: on, obsidianOnboarded: true });
+    if (!r.ok) {
+      el.cfgObsidianOn.checked = !on;
+      toast(r.error || '保存失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    el.cfgObsidianOn.checked = Boolean(state.config.obsidianEnabled);
+    toast(on ? '已开启笔记写入' : '已关闭笔记写入，只存本地');
   });
 
   el.btnSaveCfg.addEventListener('click', () => saveSettings(true));
@@ -1999,4 +2176,4 @@ if (reducedMotion.addEventListener) {
 }
 
 bind();
-initData();
+initData().then(() => maybeOnboardObsidian());

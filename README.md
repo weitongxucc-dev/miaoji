@@ -4,12 +4,12 @@
 
 ## 快速开始
 
-1. 双击 `release\秒记-Setup-1.3.5.exe` 安装，或在 [Releases](https://github.com/weitongxucc-dev/miaoji/releases/latest) 下载 `miaoji-Setup-1.3.5.exe`。安装器默认装到 `D:\秒记`（目录页可以改），当前用户安装，不需要管理员权限。
-2. 第一次运行后，点桌面上的像素小机器人（或按 `Ctrl + Alt + M`），切到「设置」。
+1. 双击 `release\秒记-Setup-1.3.6.exe` 安装，或在 [Releases](https://github.com/weitongxucc-dev/miaoji/releases/latest) 下载 `miaoji-Setup-1.3.6.exe`。安装器默认装到 `D:\秒记`（目录页可以改），当前用户安装，不需要管理员权限。没有安装 Obsidian 时，安装器会提示一次，可以直接跳过。
+2. 第一次运行后，点桌面上的像素小机器人（或按 `Ctrl + Alt + M`），会弹出「笔记写到哪？」：
+   - 检测到 Obsidian：选一个库，笔记自动写到「库\秒记\生词本.md」，不用手动找路径。
+   - 没检测到：可以点「下载 Obsidian」，或者选「先不用 Obsidian」先把词条存在本机，之后在设置里随时开启。
 3. 填入 **DeepSeek API Key**（在 https://platform.deepseek.com 申请），点「保存」→「测试连接」。
-4. 确认「Obsidian 生词本」路径，默认是：
-   `D:\Obsdian\知识库\秒记\生词本.md`
-   文件不存在时会在第一次查词时自动创建。
+4. 之后可以在「设置 → 笔记」里重新检测 Obsidian、切换库、换生词本文件，或关闭笔记写入。
 
 ## 日常用法
 
@@ -71,6 +71,8 @@
   如果旧 Key 因为系统凭据变化无法解密，在设置里重新填一次即可。
 - API Key 用 Windows 凭据加密后保存在 `D:\秒记数据\config.json`（密文，不是明文）。
 - 词条记录保存在 `D:\秒记数据\entries.json`。
+- Obsidian 检测只查三处：`obsidian://` 协议注册表、`%APPDATA%\obsidian\obsidian.json` 里的库列表、几个标准安装路径。不扫描磁盘。
+- 没有 Obsidian 或关掉笔记写入时，查词和追问照常工作，只保存在本地；不会因为写不了笔记而失败。
 - 只有查词/追问时把「你输入的词、句子或问题」发给 DeepSeek；没有别的联网行为。
 - 安装包没有代码签名，Windows SmartScreen 可能提示「已保护你的电脑」，选择「更多信息 → 仍要运行」即可。
 
@@ -88,6 +90,7 @@ npm run dist       # 打包 Windows 安装包到 release\
 - `MIAOJI_DATA_DIR`：把配置和词条记录指向临时目录
 - `MIAOJI_VAULT_FILE`：把生词本指向临时文件，避免污染真实库
 - `MIAOJI_MOCK=1`：不请求 AI，返回固定的测试词条
+- `MIAOJI_OBSIDIAN_MOCK=none`：假装没有安装 Obsidian，用来测试首次引导和降级流程
 - `MIAOJI_EXPAND=1`：启动后自动展开
 - `MIAOJI_NAV=hot|settings`：启动后自动切页
 - `MIAOJI_TEST_QUERY=...`：启动后自动查一个词
@@ -129,6 +132,7 @@ main/
   store.js      配置与词条数据（JSON，原子写入）
   ai.js         DeepSeek 调用、释义/脉络/追问提示词
   obsidian.js   Markdown 生成与标记块更新
+  obsidian-detect.js  Obsidian 安装与库检测
   preload.js    contextBridge 安全桥
 renderer/
   index.html / styles.css / terminal.css / app.js

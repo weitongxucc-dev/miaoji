@@ -175,13 +175,6 @@
                 <input id="cfgModel" type="text" spellcheck="false">
               </div>
             </div>
-            <div class="field">
-              <label for="cfgFile">Obsidian 生词本</label>
-              <div class="row">
-                <input id="cfgFile" type="text" readonly>
-                <button id="btnChoose" class="btn ghost sm">选择</button>
-              </div>
-            </div>
             <div class="field two">
               <div>
                 <label for="cfgThreshold">热词阈值（次）</label>
@@ -205,6 +198,35 @@
               <span class="switch-track"></span>
               <span class="switch-label">开机自动启动</span>
             </label>
+          </section>
+
+          <section class="settings-group">
+            <h3 class="settings-group-title">笔记</h3>
+            <div class="obs-status-row">
+              <span id="obsStatus" class="obs-status">正在检测 Obsidian…</span>
+              <button id="btnObsDetect" class="link-btn sm">重新检测</button>
+            </div>
+            <div class="field" id="vaultField">
+              <label for="cfgVault">Obsidian 库</label>
+              <select id="cfgVault" class="vault-select"></select>
+              <p class="help">选择库后，笔记写到「库\秒记\生词本.md」。</p>
+            </div>
+            <div class="field">
+              <label for="cfgFile">生词本文件</label>
+              <div class="row">
+                <input id="cfgFile" type="text" readonly placeholder="还没有选择">
+                <button id="btnChoose" class="btn ghost sm">选择</button>
+              </div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="cfgObsidianOn">
+              <span class="switch-track"></span>
+              <span class="switch-label">写入 Obsidian 笔记</span>
+            </label>
+            <div class="obs-actions">
+              <button id="btnGetObsidian" class="link-btn sm">没有 Obsidian？去下载</button>
+            </div>
+            <p class="help">关掉后只保存在秒记本地，之后随时可以重新开启。</p>
           </section>
 
           <section class="settings-group">

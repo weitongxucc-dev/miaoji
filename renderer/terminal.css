@@ -1,5 +1,5 @@
 /* ============================================================
-   秒记 v1.3.5 · 纸面终端皮肤
+   秒记 v1.3.6 · 纸面终端皮肤
    暖米白纸面 / 等宽字 / 橙色提示 / 像素小机器人
    加载在 styles.css 之后，只覆盖视觉，不改布局结构。
    ============================================================ */
@@ -845,6 +845,31 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
   font-family: var(--font-mono);
 }
 .field input:focus { border-color: var(--accent); }
+.field select {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.field select:focus { border-color: var(--accent); outline: none; }
+.field select:disabled { background: var(--head); color: var(--faint); }
+.obs-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 7px;
+}
+.obs-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--green);
+}
+.obs-status.warn { color: var(--accent-deep); }
+.obs-actions { display: flex; gap: 10px; }
 .field input::placeholder { color: var(--placeholder); }
 .field input[readonly] { background: var(--head); color: var(--muted); }
 .field input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
@@ -936,6 +961,22 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
 .modal-head h3 { font-family: var(--font-mono); color: var(--accent); }
 .modal-word { font-family: var(--font-mono); color: var(--ink); }
 .modal-sub, .modal-note { color: var(--faint); font-family: var(--font-mono); }
+.onboard-list { display: grid; gap: 6px; margin: 2px 0 8px; }
+.onboard-vault {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--field);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+}
+.onboard-vault:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.onboard-vault em { font-style: normal; font-size: 10px; color: var(--accent-deep); }
 
 .toast {
   top: auto;
