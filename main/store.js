@@ -198,6 +198,16 @@ function loadEntries() {
           e.nextReviewAt = new Date(new Date(base).getTime() + REVIEW_INTERVALS[0] * 86400000).toISOString();
         }
       }
+      // 迁移：闪念默认不进复习队列（2026-11-17 确认）。没有复习记录、也没主动加入过的闪念，移出队列；
+      // 已经复习过（reviews 有记录）或主动加入（reviewOptIn）的闪念保持原调度
+      if (e.kind === 'note' && !e.reviewOptIn && !e.mastered
+        && !(Array.isArray(e.reviews) && e.reviews.length)
+        && (e.stage !== null || e.nextReviewAt)) {
+        migrated = true;
+        e.stage = null;
+        e.graduated = false;
+        e.nextReviewAt = null;
+      }
       // 旧版「毕业即退出队列」的词，补上长尾确认（60 天后第一次确认）
       if (e.graduated && !e.mastered && !e.nextReviewAt && e.confirmLevel === undefined) {
         migrated = true;
@@ -311,16 +321,20 @@ function upsertEntry(fresh) {
     lastAt: nowIso,
     mastered: existing ? Boolean(existing.mastered) : false,
     masteredAt: existing ? (existing.masteredAt || null) : null,
-    // 复习调度：新词条收下次日到期；重查保留进度，未排期过的老词条排入队列
+    // 复习调度：词条收下次日到期；闪念默认不进队列（用户点「加入复习」才排期）；重查保留进度
     // 指定了方向就写进这一条；没指定时保留原方向，避免自动建议把老词条搬走
     track: existing
       ? (String(fresh.track || '') || String(existing.track || ''))
       : String(fresh.track || ''),
-    stage: existing ? (existing.stage ?? 0) : 0,
+    stage: existing
+      ? (existing.stage === undefined ? (kind === 'note' ? null : 0) : existing.stage)
+      : (kind === 'note' ? null : 0),
     graduated: existing ? Boolean(existing.graduated) : false,
+    // 闪念主动加入过复习的标记；没有它，迁移会把用户排期过的闪念再次移出
+    reviewOptIn: existing ? Boolean(existing.reviewOptIn) : false,
     nextReviewAt: existing && existing.nextReviewAt
       ? existing.nextReviewAt
-      : new Date(now.getTime() + REVIEW_INTERVALS[0] * 86400000).toISOString(),
+      : (kind === 'note' ? null : new Date(now.getTime() + REVIEW_INTERVALS[0] * 86400000).toISOString()),
     reviews: existing && Array.isArray(existing.reviews) ? existing.reviews.slice(-200) : [],
     // 重新查询时保留已经聊过的追问记录，只刷新词条内容
     thread: existing && Array.isArray(existing.thread) ? existing.thread.slice(-40) : [],
@@ -374,6 +388,24 @@ function setMastered(key, mastered) {
     entry.graduated = false;
     entry.nextReviewAt = new Date(Date.now() + REVIEW_INTERVALS[0] * 86400000).toISOString();
   }
+  persistEntries();
+  return entry;
+}
+
+/**
+ * 闪念主动加入复习队列：从明天开始按间隔排期。
+ * 闪念默认不排期（见 upsertEntry），只有用户在界面上点「加入复习」才进队列。
+ */
+function optInNoteReview(key) {
+  const data = loadEntries();
+  const entry = data.entries[key];
+  if (!entry) throw new Error('找不到该词条');
+  if (entry.kind !== 'note') throw new Error('只有闪念需要手动加入复习');
+  if (entry.mastered) throw new Error('这条闪念已标记掌握');
+  entry.reviewOptIn = true;
+  entry.graduated = false;
+  entry.stage = 0;
+  entry.nextReviewAt = new Date(Date.now() + REVIEW_INTERVALS[0] * 86400000).toISOString();
   persistEntries();
   return entry;
 }
@@ -551,6 +583,7 @@ module.exports = {
   upsertEntry,
   appendThread,
   setMastered,
+  optInNoteReview,
   recordReview,
   setEntryTrack,
   reviewState,

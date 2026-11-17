@@ -20,7 +20,12 @@ const el = {
   composerWrap: $('#composerWrap'),
   input: $('#input'),
   btnParse: $('#btnParse'),
-  modeSeg: $('#modeSeg'),
+  noteInput: $('#noteInput'),
+  noteTrack: $('#noteTrack'),
+  noteList: $('#noteList'),
+  noteCount: $('#noteCount'),
+  btnNoteSave: $('#btnNoteSave'),
+  noteAll: $('#noteAll'),
   captureTrack: $('#captureTrack'),
   captureTrackAdd: $('#captureTrackAdd'),
   clipChip: $('#clipChip'),
@@ -128,7 +133,10 @@ const state = {
   agentBusy: false,
   clipWatchText: '',
   clipWatchTimer: 0,
-  captureMode: 'auto'
+  noteTrack: '',
+  noteOpenKey: '',
+  noteOrganizing: {},
+  noteErrors: {}
 };
 
 /* ---------------- 工具 ---------------- */
@@ -901,7 +909,12 @@ function basicsZone(e) {
       body += `<div class="lookup-src"><span class="lookup-lbl">你想表达</span><b>${esc(e.lookup_zh)}</b></div>`;
     }
     if (e.meaning_zh) body += meaningHTML(e.meaning_zh);
-    if (e.definition_en) body += `<p class="def-en">${richInline(e.definition_en)}</p>`;
+    if (e.definition_en && /[一-龥]/.test(e.word || '')) {
+      // 中文术语卡：把英文说法作为「英文表达」分区，而不是一行英文释义
+      body += `<div class="sec-label"><span>英文表达</span></div><p class="def-en en-expr">${richInline(e.definition_en)}</p>`;
+    } else if (e.definition_en) {
+      body += `<p class="def-en">${richInline(e.definition_en)}</p>`;
+    }
 
     if (e.examples && e.examples.length) {
       body += `<div class="sec-label"><span>${isTerm ? '领域例句' : '例句'}</span><b>${pad2(e.examples.length)}</b></div>
@@ -1260,7 +1273,7 @@ function renderEmpty() {
     <h3>${needKey ? '先填一个 API Key' : '进入一个新领域，从收下第一个术语开始'}</h3>
     <p>${needKey
       ? '秒记用 DeepSeek 按当前方向解释术语，Key 只存在你这台电脑上。'
-      : '术语、单词、句子、链接或一段想法都行。按当前方向解释，并自动排进复习。'}</p>
+      : '术语、单词、句子、链接都行；随手想记的去「闪念」页。解析结果按当前方向解释，并排进复习。'}</p>
     ${needKey
       ? `<div class="recent-row"><button class="recent-chip warn" data-settings>去设置 API Key</button></div>`
       : ''}
@@ -1475,6 +1488,176 @@ function renderAll() {
   renderLibraryTracks();
   if (state.tab === 'hot') renderHot();
   if (state.tab === 'review') renderReview();
+  if (state.tab === 'note') renderNoteList();
+}
+
+/* ---------------- 闪念（先记下，整理随后补上） ---------------- */
+
+function noteEntries() {
+  return Object.values(state.entries)
+    .filter((e) => e.kind === 'note')
+    .sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt));
+}
+
+function fmtClock(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function fmtDayLabel(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const day = (n) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - n).toDateString();
+  if (d.toDateString() === day(0)) return '今天';
+  if (d.toDateString() === day(1)) return '昨天';
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+function noteStatus(e) {
+  if (state.noteOrganizing[e.key]) return { text: '整理中', cls: 'is-organizing' };
+  if (state.noteErrors[e.key]) return { text: '整理失败 · 重试', cls: 'is-error' };
+  if ((e.key_points && e.key_points.length) || e.summary) return { text: '已整理', cls: 'is-organized' };
+  return { text: '未整理', cls: 'is-plain' };
+}
+
+function renderNoteView() {
+  if (!el.noteList) return;
+  const notes = noteEntries();
+  if (el.noteCount) el.noteCount.textContent = String(notes.length);
+  // 方向下拉：保留当前选择；「未指定方向」排在最前
+  const prev = state.noteTrack;
+  const options = ['<option value="">未指定方向</option>']
+    .concat((state.config?.tracks || []).map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`))
+    .join('');
+  el.noteTrack.innerHTML = options;
+  el.noteTrack.value = (state.config?.tracks || []).some((t) => t.id === prev) ? prev : '';
+  state.noteTrack = el.noteTrack.value;
+  renderNoteList();
+}
+
+function renderNoteList() {
+  if (!el.noteList) return;
+  const notes = noteEntries();
+  if (el.noteCount) el.noteCount.textContent = String(notes.length);
+  if (!notes.length) {
+    el.noteList.innerHTML = `<div class="note-empty">
+      <p>还没有闪念。想到什么就写下来，AI 随后整理，不打断记录。</p>
+    </div>`;
+    return;
+  }
+  const shown = notes.slice(0, 30);
+  let html = '';
+  let lastDay = '';
+  for (const e of shown) {
+    const day = fmtDayLabel(e.lastAt);
+    if (day !== lastDay) {
+      html += `<div class="note-day">${esc(day)}</div>`;
+      lastDay = day;
+    }
+    html += noteRowHTML(e);
+  }
+  if (notes.length > shown.length) {
+    html += `<div class="note-day">更早的 ${notes.length - shown.length} 条在词库里</div>`;
+  }
+  el.noteList.innerHTML = html;
+}
+
+function noteRowHTML(e) {
+  const open = state.noteOpenKey === e.key;
+  const track = trackNameOf(e.track);
+  const st = noteStatus(e);
+  const snippet = plainText((e.original || '').split('\n').find((l) => l.trim()) || e.word);
+  const inQueue = Boolean(e.reviewOptIn || (e.nextReviewAt && !e.mastered));
+  // 只有「整理失败」「未整理」才是可点的整理入口；已整理不响应点击，避免误耗请求
+  const statusHTML = (st.cls === 'is-error' || st.cls === 'is-plain')
+    ? `<button class="note-status ${st.cls}" data-note-organize="${esc(e.key)}" title="整理是 AI 从原文提炼要点，不改写原文">${st.text}</button>`
+    : `<span class="note-status ${st.cls}">${st.text}</span>`;
+  let detail = '';
+  if (open) {
+    const aiParts = [];
+    if (e.summary) aiParts.push(`<p class="note-ai-summary">${richBlock(e.summary)}</p>`);
+    if (e.key_points && e.key_points.length) {
+      aiParts.push(`<ul class="point-list">${e.key_points.map((p) => `<li>${richInline(p)}</li>`).join('')}</ul>`);
+    }
+    const terms = (e.terms || []).map((t) => `<span class="tag">${esc(t.word)}</span>`).join('');
+    detail = `<div class="note-detail">
+      <div class="note-detail-original">${originalHTML(e.original || '')}</div>
+      ${aiParts.length ? `<div class="note-ai"><div class="sec-label"><span>整理</span></div>${aiParts.join('')}</div>` : ''}
+      ${terms ? `<div class="tag-row note-terms">${terms}</div>` : ''}
+      ${state.noteErrors[e.key] ? `<p class="note-error">${esc(state.noteErrors[e.key])}</p>` : ''}
+      <div class="note-actions">
+        ${e.mastered
+          ? '<span class="note-state">已掌握</span>'
+          : inQueue
+            ? '<span class="note-state">已在复习队列</span>'
+            : `<button class="link-btn sm" data-note-review="${esc(e.key)}">加入复习</button>`}
+        <button class="link-btn sm" data-note-detail="${esc(e.key)}">更多操作</button>
+        <button class="link-btn sm" data-note-organize="${esc(e.key)}">${state.noteOrganizing[e.key] ? '整理中…' : (state.noteErrors[e.key] ? '重试整理' : '重新整理')}</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="note-row${open ? ' open' : ''}" data-note-key="${esc(e.key)}">
+    <span class="note-time">${fmtClock(e.lastAt)}</span>
+    <div class="note-body">
+      <p class="note-snip">${esc(truncate(snippet, 72))}</p>
+      <p class="note-sub">
+        <span class="note-track-name">${esc(track || '未指定方向')}</span>
+        ${statusHTML}
+      </p>
+      ${detail}
+    </div>
+  </div>`;
+}
+
+async function saveNote() {
+  const text = el.noteInput.value.trim();
+  if (!text) {
+    toast('先写一句内容再记下');
+    el.noteInput.focus();
+    return;
+  }
+  el.btnNoteSave.disabled = true;
+  try {
+    const res = await window.api.noteSave(text, state.noteTrack || null);
+    if (!res.ok) {
+      toast(res.error || '没记下来，再试一次', 'warn');
+      return;
+    }
+    state.entries[res.entry.key] = res.entry;
+    el.noteInput.value = '';
+    el.noteInput.focus();
+    delete state.noteErrors[res.entry.key];
+    state.noteOpenKey = res.entry.key;
+    renderNoteList();
+    renderAll();
+    toast('已记下');
+    organizeNote(res.entry.key);
+  } finally {
+    el.btnNoteSave.disabled = false;
+  }
+}
+
+async function organizeNote(key) {
+  if (state.noteOrganizing[key]) return;
+  state.noteOrganizing[key] = true;
+  delete state.noteErrors[key];
+  renderNoteList();
+  try {
+    const res = await window.api.noteOrganize(key);
+    if (res.ok) {
+      state.entries[key] = res.entry;
+    } else {
+      state.noteErrors[key] = res.error || '整理没有完成';
+    }
+  } catch (err) {
+    state.noteErrors[key] = (err && err.message) || '整理没有完成';
+  } finally {
+    delete state.noteOrganizing[key];
+    if (state.tab === 'note') renderNoteList();
+    renderAll();
+  }
 }
 
 /* ---------------- 回顾（提取式复习） ---------------- */
@@ -2113,7 +2296,7 @@ async function parse(text, mode) {
   renderLoading(input);
 
   try {
-    const res = await window.api.query(input, mode || state.captureMode || 'auto', state.captureTrack || null);
+    const res = await window.api.query(input, 'auto', state.captureTrack || null);
     if (!res.ok) {
       renderError(res.error);
       toast(res.error, 'warn');
@@ -2353,7 +2536,7 @@ function closeMoreMenu() {
 function switchTab(tab) {
   state.tab = tab;
   closeMoreMenu();
-  $$('.head-actions [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  $$('.head-actions [data-tab], .panel-foot [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   if (el.btnMore) el.btnMore.classList.toggle('active', tab === 'agent' || tab === 'settings');
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + tab));
   document.body.classList.toggle('result-view', tab === 'jot' && Boolean(state.lastResult) && !state.busy);
@@ -2361,11 +2544,13 @@ function switchTab(tab) {
     renderLibraryTracks();
     renderHot();
   }
+  if (tab === 'note') renderNoteView();
   if (tab === 'review') renderReview();
   if (tab === 'stats') renderStatsView();
   if (tab === 'agent') renderAgent();
   if (tab === 'settings') fillSettings();
   if (tab === 'jot' && !state.lastResult) setTimeout(() => el.input.focus(), 40);
+  if (tab === 'note') setTimeout(() => el.noteInput.focus(), 40);
   if (tab !== 'jot') stopEmptyRobot();
   else if (!state.lastResult) startEmptyRobot();
 }
@@ -2981,21 +3166,66 @@ function bind() {
 
   el.btnParse.addEventListener('click', () => parse());
 
-  if (el.modeSeg) {
-    el.modeSeg.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-mode]');
-      if (!btn) return;
-      state.captureMode = btn.dataset.mode;
-      for (const b of el.modeSeg.querySelectorAll('button')) b.classList.toggle('active', b === btn);
-      const ph = {
-        auto: '单词、术语、句子，或一个链接…',
-        lookup: '想表达什么？输入中文，给出英文说法…',
-        note: '随手记一段想法或摘录，AI 只整理不改写…'
-      }[state.captureMode];
-      el.input.placeholder = ph;
-      el.input.focus();
-    });
-  }
+  el.btnNoteSave.addEventListener('click', saveNote);
+
+  el.noteInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) {
+      e.preventDefault();
+      saveNote();
+    }
+  });
+
+  el.noteTrack.addEventListener('change', () => {
+    state.noteTrack = el.noteTrack.value || '';
+    el.noteInput.focus();
+  });
+
+  el.noteAll.addEventListener('click', () => {
+    switchTab('hot');
+    if (el.libTypeSeg) {
+      el.libTypeSeg.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.type === 'note'));
+      state.typeFilter = 'note';
+    }
+    renderLibraryTracks();
+    renderHot();
+  });
+
+  el.noteList.addEventListener('click', (e) => {
+    const org = e.target.closest('[data-note-organize]');
+    if (org) {
+      organizeNote(org.dataset.noteOrganize);
+      return;
+    }
+    const rev = e.target.closest('[data-note-review]');
+    if (rev) {
+      const key = rev.dataset.noteReview;
+      window.api.noteOptInReview(key).then((r) => {
+        if (!r.ok) {
+          toast(r.error || '操作失败', 'warn');
+          return;
+        }
+        state.entries[key] = r.entry;
+        renderNoteList();
+        renderAll();
+        toast('明天开始复习这条闪念');
+      });
+      return;
+    }
+    const more = e.target.closest('[data-note-detail]');
+    if (more) {
+      const entry = state.entries[more.dataset.noteDetail];
+      if (entry) {
+        openDetail(entry);
+      }
+      return;
+    }
+    const row = e.target.closest('.note-row');
+    if (row) {
+      const key = row.dataset.noteKey;
+      state.noteOpenKey = state.noteOpenKey === key ? '' : key;
+      renderNoteList();
+    }
+  });
 
   if (el.captureTrack) {
     el.captureTrack.addEventListener('change', () => {
@@ -3039,7 +3269,7 @@ function bind() {
     }
   });
 
-  $$('.head-actions [data-tab]').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+  $$('.head-actions [data-tab], .panel-foot [data-tab]').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
 
   if (el.btnMore) {
     el.btnMore.addEventListener('click', (e) => {

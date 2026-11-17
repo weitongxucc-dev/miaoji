@@ -94,17 +94,8 @@
       </div>
       <nav class="head-actions" aria-label="主导航">
         <button class="nav-text active" data-tab="jot" title="收录术语">收录</button>
+        <button class="nav-text" data-tab="note" title="随手记闪念">闪念</button>
         <button class="nav-text" data-tab="review" id="btnReview" title="回顾到期的术语">回顾<span id="reviewDue" class="nav-badge accent hidden">0</span></button>
-        <button class="nav-text" data-tab="hot" title="查看词库">词库</button>
-        <button class="nav-text" data-tab="stats" title="查看洞察">洞察</button>
-        <div class="more-wrap">
-          <button class="nav-text" id="btnMore" aria-haspopup="menu" aria-expanded="false" title="助手、设置、收起">更多</button>
-          <div id="moreMenu" class="more-menu hidden" role="menu">
-            <button data-tab="agent" role="menuitem">助手</button>
-            <button data-tab="settings" role="menuitem">设置</button>
-            <button id="btnCollapse" role="menuitem">收起</button>
-          </div>
-        </div>
       </nav>
     </header>
     <div class="panel-dither" aria-hidden="true"></div>
@@ -122,11 +113,6 @@
             </div>
             <textarea id="input" rows="2" spellcheck="false" placeholder="单词、术语、句子，或一个链接…"></textarea>
             <div class="composer-bar">
-              <div class="seg mode-seg" id="modeSeg" title="选择记录类型">
-                <button data-mode="auto" class="active">词句</button>
-                <button data-mode="lookup">中译英</button>
-                <button data-mode="note">闪念</button>
-              </div>
               <button id="clipChip" class="clip-chip hidden" title="点击填入剪贴板内容"></button>
               <button id="btnParse" class="btn primary parse-btn">
                 <span>解析</span><svg class="ico sm"><use href="#i-send"></use></svg>
@@ -136,6 +122,28 @@
         </div>
 
         <div id="result" class="result"></div>
+      </section>
+
+      <section id="view-note" class="view">
+        <div class="view-head">
+          <div>
+            <h2 class="view-title">闪念<span class="note-seal" aria-hidden="true">记</span></h2>
+          </div>
+          <span id="noteCount" class="count-tag">0</span>
+        </div>
+        <div class="note-composer">
+          <label class="note-track-row">
+            <span>新闪念归入</span>
+            <select id="noteTrack" aria-label="新闪念归入的学习方向"></select>
+          </label>
+          <textarea id="noteInput" rows="5" spellcheck="false" placeholder="记下一个判断、一段摘录，或还没想清楚的问题…"></textarea>
+          <div class="note-bar">
+            <span class="note-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 记下</span>
+            <button id="btnNoteSave" class="btn primary sm">记下</button>
+          </div>
+        </div>
+        <div id="noteList" class="note-list"></div>
+        <button id="noteAll" class="link-btn sm note-all">查看全部闪念</button>
       </section>
 
       <section id="view-hot" class="view">
@@ -402,6 +410,7 @@
               <div class="key-list">
                 <div class="key-row"><kbd>Enter</kbd><span>解析当前输入</span></div>
                 <div class="key-row"><kbd>Shift + Enter</kbd><span>输入框内换行</span></div>
+                <div class="key-row"><kbd>Ctrl + Enter</kbd><span>闪念页：记下当前内容</span></div>
                 <div class="key-row"><kbd>Esc</kbd><span>收起面板</span></div>
                 <div class="key-row"><kbd>Ctrl + Alt + M</kbd><span>全局唤出 / 收起</span></div>
                 <div class="key-row"><kbd>Ctrl + Alt + S</kbd><span>选中文字直接送进秒记</span></div>
@@ -430,6 +439,19 @@
         </div>
       </section>
     </main>
+
+    <nav class="panel-foot" aria-label="辅助导航">
+      <button class="foot-nav" data-tab="hot" title="查看词库">词库</button>
+      <button class="foot-nav" data-tab="stats" title="查看洞察">洞察</button>
+      <div class="more-wrap">
+        <button class="foot-nav" id="btnMore" aria-haspopup="menu" aria-expanded="false" title="助手、设置、收起">更多</button>
+        <div id="moreMenu" class="more-menu hidden" role="menu">
+          <button data-tab="agent" role="menuitem">助手</button>
+          <button data-tab="settings" role="menuitem">设置</button>
+          <button id="btnCollapse" role="menuitem">收起</button>
+        </div>
+      </div>
+    </nav>
   </div>
 
   <div id="modal" class="modal hidden"><div id="modalCard" class="modal-card"></div></div>

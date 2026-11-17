@@ -712,6 +712,87 @@ ipcMain.handle('term:collect', async (_e, word, trackId) => {
   }
 });
 
+/** 闪念：先原样落盘（不等待 AI），整理随后补上 */
+function buildRawNote(raw, forcedTrack) {
+  const firstLine = raw.split('\n').map((s) => s.trim()).find(Boolean) || '';
+  return {
+    kind: 'note',
+    word: firstLine.slice(0, 20) || '闪念',
+    summary: '',
+    key_points: [],
+    terms: [],
+    note: '',
+    followups: [],
+    track: forcedTrack ? forcedTrack.id : '',
+    source: { type: 'manual', url: '', title: '', site: '', capturedAt: new Date().toISOString() },
+    original: raw,
+    phonetic: '',
+    pos: '',
+    meaning_zh: '',
+    examples: [],
+    synonyms: [],
+    collocations: [],
+    memory: '',
+    origin: { root: '', first_use: '', story: '', timeline: [], scenes: [], why: '', related: [] }
+  };
+}
+
+ipcMain.handle('note:save', (_e, text, trackId) => {
+  const raw = String(text || '').trim();
+  if (!raw) return { ok: false, error: '先写一句内容再记下' };
+  try {
+    const conf = store.loadConfig();
+    const forcedTrack = forcedTrackFor(conf, trackId);
+    if (String(trackId || '').trim() && !forcedTrack) {
+      return { ok: false, error: '找不到这个学习方向，请重新选择' };
+    }
+    const { entry, isNew } = store.upsertEntry(buildRawNote(raw, forcedTrack));
+    // 原样先写进 Obsidian，整理后由 note:organize 原地更新
+    let write = { ok: true, skipped: true };
+    try {
+      write = obsidian.upsert(entry, store.listEntries(), conf);
+    } catch (err) {
+      write = { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+    return { ok: true, entry, isNew, obsidian: write };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('note:organize', async (_e, key) => {
+  const k = String(key || '');
+  try {
+    const conf = store.loadConfig();
+    const entry = store.getEntry(k);
+    if (!entry || entry.kind !== 'note') return { ok: false, error: '找不到这条闪念' };
+    const trackName = (conf.tracks || []).find((t) => t.id === entry.track)?.name || '';
+    const fresh = await cleanNote(entry.original, conf, trackName || null);
+    fresh.key = k;
+    fresh.word = fresh.word || entry.word;
+    // 保留已保存的方向；AI 的方向建议只在原本没有方向时采用
+    fresh.track = entry.track || fresh.track;
+    const { entry: updated } = store.upsertEntry(fresh);
+    let write = { ok: true, skipped: true };
+    try {
+      write = obsidian.upsert(updated, store.listEntries(), conf);
+    } catch (err) {
+      write = { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+    return { ok: true, entry: updated, obsidian: write };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('note:optin-review', (_e, key) => {
+  try {
+    return { ok: true, entry: store.optInNoteReview(String(key)) };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
 ipcMain.handle('app:open-url', (_e, url) => {
   const u = String(url || '');
   if (!/^https?:\/\//i.test(u)) return { ok: false, error: '只支持网页链接' };
