@@ -279,6 +279,12 @@ async function openObsidianNote() {
   return { ok: true };
 }
 
+function openNoteWithFeedback() {
+  openObsidianNote().then((r) => {
+    if (!r.ok && win) win.webContents.send('ui:toast', { text: '打不开笔记：' + r.error, type: 'warn' });
+  });
+}
+
 function buildTrayMenu() {
   if (!tray) return;
   tray.setContextMenu(
@@ -288,11 +294,7 @@ function buildTrayMenu() {
       { type: 'separator' },
       {
         label: '打开 Obsidian 生词本',
-        click: () => {
-          openObsidianNote().then((r) => {
-            if (!r.ok && win) win.webContents.send('ui:toast', { text: '打不开笔记：' + r.error, type: 'warn' });
-          });
-        }
+        click: () => openNoteWithFeedback()
       },
       {
         label: '设置…',
@@ -321,6 +323,41 @@ function buildTrayMenu() {
       }
     ])
   );
+}
+
+function showPetMenu() {
+  if (!win) return;
+  const menu = Menu.buildFromTemplate([
+    { label: '展开秒记', accelerator: SHORTCUT, click: () => expand() },
+    { type: 'separator' },
+    { label: '打开 Obsidian 生词本', click: () => openNoteWithFeedback() },
+    {
+      label: '设置…',
+      click: () => {
+        expand();
+        if (win) win.webContents.send('ui:nav', 'settings');
+      }
+    },
+    { type: 'separator' },
+    {
+      label: '开机自动启动',
+      type: 'checkbox',
+      checked: Boolean(store.loadConfig().launchAtLogin),
+      click: (item) => {
+        store.saveConfig({ launchAtLogin: item.checked });
+        applyLaunchAtLogin(item.checked);
+      }
+    },
+    {
+      label: '退出秒记',
+      click: () => {
+        quitting = true;
+        store.saveConfig({ ballPos: petPos });
+        app.quit();
+      }
+    }
+  ]);
+  menu.popup({ window: win });
 }
 
 function createTray() {
@@ -540,6 +577,11 @@ ipcMain.handle('win:expand', () => {
 ipcMain.handle('win:collapse', () => {
   collapse();
   return { expanded: false };
+});
+
+ipcMain.on('win:pet-menu', (e) => {
+  if (!win || e.sender !== win.webContents) return;
+  showPetMenu();
 });
 
 ipcMain.on('win:drag-start', (_e, p) => {

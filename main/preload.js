@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
 
   expand: () => invoke('win:expand'),
   collapse: () => invoke('win:collapse'),
+  petMenu: () => send('win:pet-menu'),
 
   dragStart: (x, y) => send('win:drag-start', { x, y }),
   dragMove: (x, y) => send('win:drag-move', { x, y }),

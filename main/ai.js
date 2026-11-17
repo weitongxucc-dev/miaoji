@@ -59,14 +59,17 @@ const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也
 2. origin 只写有把握的内容。不确定就明确写「资料有限」或「一说」，绝对不要编造年份、人名、典故或词源。
 3. 技术术语的 origin.story 要讲清楚它在专业语境里怎么被使用，而不只是普通词义。
 4. followups 给 3 条，每条不超过 24 个字，必须是用户真的会想问的问题。
-5. 只输出 JSON。所有中文内容使用简体中文。`;
+5. 正文里可以用 **加粗** 标出关键对比或易混点，每个字段最多 1 处；不要用标题、表格或代码块。
+6. 只输出 JSON。所有中文内容使用简体中文。`;
 
 const FOLLOWUP_PROMPT = `你是「秒记」的英语词典助教。用户正在追问一个已经记录过的词条或句子。
 你会收到词条上下文和之前的追问记录。请基于这些内容回答当前问题。
 要求：
 - 用简体中文，先直接回答，再补充 1 个例句或 1 组对比；不要整段重复原词条。
 - 回答控制在 180 字以内；确实需要展开时最多 260 字。
+- 可以用换行分段，需要列举时用「- 」开头的短列表；可以用 **加粗** 标出关键差别，整个回答最多 2 处。
 - 不编造词源、年份或用法；不确定就说明。
+- 不要使用标题、表格、代码块或 HTML。
 - 只输出一个 JSON 对象，不要 markdown 代码块：
 { "answer": "回答正文，可用换行分段", "suggestions": ["接下来可能想问的短问题", "……", "……"] }
 suggestions 给 2 到 3 条，每条不超过 24 个字。`;
@@ -414,7 +417,7 @@ function mockEntry(input) {
 
 function mockFollowUp(entry, question) {
   const base = {
-    answer: `（测试回答）关于「${question}」：这个词的核心是「同时到处都存在」，不是单纯指次数多。\n\n对比一下：The internet is ubiquitous. 强调互联网遍布各处；The internet is frequently used. 只强调使用频率高。\n\n再看一个例子：Smartphones have become ubiquitous in daily life.（智能手机在日常生活中已经无处不在。）`,
+    answer: `（测试回答）关于「${question}」：这个词的核心是「同时到处都存在」，不是单纯指**次数多**。\n\n对比一下：\n- The internet is ubiquitous. 强调互联网遍布各处；\n- The internet is frequently used. 只强调使用频率高。\n\n再看一个例子：Smartphones have become ubiquitous in daily life.（智能手机在日常生活中已经无处不在。）`,
     suggestions: ['再给我一个技术语境里的例子', '它和 omnipresent 的差别是什么？', '正式写作里怎么用更自然？']
   };
   if (!entry || entry.kind === 'sentence') {

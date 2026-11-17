@@ -10,6 +10,7 @@ const el = {
   bubble: $('#bubble'),
   petCount: $('#petCount'),
   panel: $('#panel'),
+  brand: $('#brand'),
   headAvatar: $('#headAvatar'),
   headStat: $('#headStat'),
   btnCollapse: $('#btnCollapse'),
@@ -75,6 +76,74 @@ const esc = (v) =>
 const icon = (id, cls = '') => `<svg class="ico ${cls}"><use href="#${id}"></use></svg>`;
 const pad2 = (n) => String(n).padStart(2, '0');
 
+/* 轻量富文本：先转义，只放行 **加粗**、`代码`、换行分段和 - / 1. 列表 */
+const plainText = (v) => String(v || '')
+  .replace(/\*\*|`/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const richInline = (v) =>
+  esc(v)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+
+function richBlock(v) {
+  const raw = String(v === null || v === undefined ? '' : v).replace(/\r\n?/g, '\n').trim();
+  if (!raw) return '';
+  const lines = raw.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  let html = '';
+  let list = null;
+  const closeList = () => {
+    if (!list) return;
+    html += `</${list}>`;
+    list = null;
+  };
+  for (const line of lines) {
+    const bullet = line.match(/^[-•·]\s+(.+)$/);
+    const numbered = line.match(/^\d+[.、)]\s+(.+)$/);
+    if (bullet) {
+      if (list !== 'ul') {
+        closeList();
+        html += '<ul>';
+        list = 'ul';
+      }
+      html += `<li>${richInline(bullet[1])}</li>`;
+    } else if (numbered) {
+      if (list !== 'ol') {
+        closeList();
+        html += '<ol>';
+        list = 'ol';
+      }
+      html += `<li>${richInline(numbered[1])}</li>`;
+    } else {
+      closeList();
+      html += `<p>${richInline(line)}</p>`;
+    }
+  }
+  closeList();
+  return html;
+}
+
+function meaningHTML(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  const parts = raw.split(/\s*[；;]\s*/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length < 2 || parts.length > 5) return `<p class="meaning">${richInline(raw)}</p>`;
+  return `<ol class="sense-list">${parts.map((p, i) => `<li>
+    <span class="sense-idx">${pad2(i + 1)}</span>
+    <span class="sense-text">${richInline(p)}</span>
+  </li>`).join('')}</ol>`;
+}
+
+function highlightWord(text, word) {
+  const safe = esc(text);
+  const w = String(word || '').trim();
+  if (w.length < 2) return safe;
+  const stem = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\b(${stem}(?:s|es|ed|d|ing|ly)?)\\b`, 'gi');
+  return safe.replace(re, '<b class="hl">$1</b>');
+}
+
 function truncate(s, n) {
   const str = String(s || '');
   return str.length > n ? str.slice(0, n - 1) + '…' : str;
@@ -135,7 +204,9 @@ const robot = {
   avatarHoldTimer: 0,
   avatarClipTimer: 0,
   avatarIdleTimer: 0,
-  avatarLastClip: ''
+  avatarLastClip: '',
+  avatarWildTimer: 0,
+  avatarWilding: false
 };
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -477,7 +548,56 @@ function runAvatarIdleClip() {
   }, clip === 'blink' ? 140 : clip === 'wink' ? 260 : rand(520, 760));
 }
 
+const AVATAR_WILD_FRAMES = ['look-left', 'wink', 'look-up', 'blink', 'look-right', 'look-down'];
+
+function clearAvatarWild() {
+  if (!robot.avatarWilding) return;
+  robot.avatarWilding = false;
+  clearInterval(robot.avatarWildTimer);
+  robot.avatarWildTimer = 0;
+  const avatar = el.headAvatar.parentElement;
+  if (avatar) avatar.classList.remove('is-wild');
+}
+
+function startAvatarWild() {
+  if (robot.avatarWilding || reducedMotion.matches) return;
+  clearTimeout(robot.avatarHoldTimer);
+  clearTimeout(robot.avatarClipTimer);
+  clearTimeout(robot.avatarIdleTimer);
+  robot.avatarHoldTimer = 0;
+  robot.avatarClipTimer = 0;
+  robot.avatarIdleTimer = 0;
+  robot.avatarMode = 'wild';
+  robot.avatarWilding = true;
+
+  const avatar = el.headAvatar.parentElement;
+  if (avatar) {
+    avatar.classList.remove('is-happy', 'is-error', 'is-thinking', 'is-tilt-left', 'is-tilt-right');
+    avatar.classList.add('is-wild');
+  }
+
+  let i = 0;
+  const frame = () => {
+    const clip = AVATAR_WILD_FRAMES[i % AVATAR_WILD_FRAMES.length];
+    el.headAvatar.src = robotSrc(clip, true);
+    if (avatar) {
+      avatar.classList.toggle('is-tilt-left', clip === 'look-left');
+      avatar.classList.toggle('is-tilt-right', clip === 'look-right');
+    }
+    i += 1;
+  };
+  frame();
+  robot.avatarWildTimer = setInterval(frame, 110);
+}
+
+function stopAvatarWild() {
+  if (!robot.avatarWilding) return;
+  clearAvatarWild();
+  setHeadAvatar(state.busy || state.followBusy ? 'think' : 'idle');
+}
+
 function setHeadAvatar(mode, hold = 0) {
+  clearAvatarWild();
   clearTimeout(robot.avatarHoldTimer);
   clearTimeout(robot.avatarClipTimer);
   clearTimeout(robot.avatarIdleTimer);
@@ -546,7 +666,7 @@ function renderStats() {
 /* ---------------- 词条渲染 ---------------- */
 
 function entryGist(e) {
-  return e.meaning_zh || e.sentence_translation || '';
+  return plainText(e.meaning_zh || e.sentence_translation || '');
 }
 
 function countPill(e) {
@@ -563,21 +683,21 @@ function basicsZone(e) {
   let body = '';
 
   if (isSentence) {
-    body += `<p class="sentence-trans">${esc(e.sentence_translation)}</p>`;
+    body += `<div class="rich-text sentence-trans">${richBlock(e.sentence_translation)}</div>`;
     if (e.key_points && e.key_points.length) {
       body += `<div class="sec-label"><span>要点</span><b>${pad2(e.key_points.length)}</b></div>
-        <ul class="point-list">${e.key_points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`;
+        <ul class="point-list">${e.key_points.map((p) => `<li>${richInline(p)}</li>`).join('')}</ul>`;
     }
     if (e.key_words && e.key_words.length) {
       body += `<div class="sec-label"><span>关键词</span><b>${pad2(e.key_words.length)}</b></div>
         <ul class="kw-list">${e.key_words.map((k) => `<li><b>${esc(k.word)}</b>${k.meaning ? ' · ' + esc(k.meaning) : ''}</li>`).join('')}</ul>`;
     }
     if (e.note) {
-      body += `<p class="note-line"><span>${esc(e.note)}</span></p>`;
+      body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
     }
   } else {
-    if (e.meaning_zh) body += `<p class="meaning">${esc(e.meaning_zh)}</p>`;
-    if (e.definition_en) body += `<p class="def-en">${esc(e.definition_en)}</p>`;
+    if (e.meaning_zh) body += meaningHTML(e.meaning_zh);
+    if (e.definition_en) body += `<p class="def-en">${richInline(e.definition_en)}</p>`;
 
     if (e.examples && e.examples.length) {
       body += `<div class="sec-label"><span>例句</span><b>${pad2(e.examples.length)}</b></div>
@@ -585,8 +705,8 @@ function basicsZone(e) {
           <div class="ex">
             <span class="ex-idx">${pad2(i + 1)}</span>
             <div>
-              <p class="ex-en">${esc(x.en)}</p>
-              ${x.zh ? `<p class="ex-zh">${esc(x.zh)}</p>` : ''}
+              <p class="ex-en">${highlightWord(x.en, e.word)}</p>
+              ${x.zh ? `<p class="ex-zh">${richInline(x.zh)}</p>` : ''}
             </div>
           </div>`).join('')}</div>`;
     }
@@ -605,10 +725,10 @@ function basicsZone(e) {
     }
 
     if (e.memory) {
-      body += `<div class="memory">${icon('i-bulb', 'sm')}<span>${esc(e.memory)}</span></div>`;
+      body += `<div class="memory">${icon('i-bulb', 'sm')}<span>${richInline(e.memory)}</span></div>`;
     }
     if (e.note) {
-      body += `<p class="note-line"><span>${esc(e.note)}</span></p>`;
+      body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
     }
   }
 
@@ -643,7 +763,7 @@ function originZone(e) {
 
     if (o.story) {
       body += `<div class="sec-label"><span>${isSentence ? '语境' : '脉络'}</span></div>
-        <p class="origin-story">${esc(o.story)}</p>`;
+        <div class="rich-text origin-story">${richBlock(o.story)}</div>`;
     }
 
     if (o.timeline && o.timeline.length) {
@@ -661,7 +781,7 @@ function originZone(e) {
     }
 
     if (o.why) {
-      body += `<div class="why-box"><span class="why-tag">辨析</span><p>${esc(o.why)}</p></div>`;
+      body += `<div class="why-box"><span class="why-tag">辨析</span><p>${richInline(o.why)}</p></div>`;
     }
 
     if (o.related && o.related.length) {
@@ -699,9 +819,12 @@ function threadTurns(e) {
   let out = thread.map((m) => {
     const who = m.role === 'assistant' ? '答' : '问';
     const cls = m.role === 'assistant' ? 'a' : 'q';
+    const text = m.role === 'assistant'
+      ? `<div class="rich-text">${richBlock(m.text)}</div>`
+      : `<p>${esc(m.text)}</p>`;
     return `<div class="turn ${cls}">
       <span class="turn-tag">${who}</span>
-      <p class="turn-text">${esc(m.text)}</p>
+      <div class="turn-text">${text}</div>
     </div>`;
   }).join('');
 
@@ -1402,8 +1525,86 @@ function bindPetDrag() {
 
 /* ---------------- 事件 ---------------- */
 
+function bindBrand() {
+  const brand = el.brand;
+  if (!brand) return;
+
+  let pressTimer = 0;
+  let pressed = false;
+  let wild = false;
+  let startX = 0;
+  let startY = 0;
+  let stopTimer = 0;
+
+  const cancelPress = () => {
+    clearTimeout(pressTimer);
+    pressTimer = 0;
+  };
+
+  const finish = (collapse) => {
+    if (!pressed) return;
+    pressed = false;
+    cancelPress();
+    if (wild) {
+      wild = false;
+      stopTimer = setTimeout(stopAvatarWild, 620);
+    } else if (collapse) {
+      window.api.collapse();
+    }
+  };
+
+  brand.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    clearTimeout(stopTimer);
+    pressed = true;
+    wild = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    try {
+      brand.setPointerCapture(e.pointerId);
+    } catch {
+      /* 合成事件可能没有 pointerId */
+    }
+    cancelPress();
+    pressTimer = setTimeout(() => {
+      pressTimer = 0;
+      wild = true;
+      startAvatarWild();
+    }, 480);
+  });
+
+  window.addEventListener('pointerup', () => finish(true));
+  window.addEventListener('pointercancel', () => finish(false));
+  brand.addEventListener('pointermove', (e) => {
+    if (!pressed) return;
+    if (Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY) > 8) {
+      pressed = false;
+      cancelPress();
+      if (wild) {
+        wild = false;
+        stopAvatarWild();
+      }
+    }
+  });
+
+  brand.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      window.api.collapse();
+    }
+  });
+
+  brand.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
 function bind() {
   bindPetDrag();
+  bindBrand();
+
+  el.pet.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (!state.expanded) window.api.petMenu();
+  });
 
   el.btnCollapse.addEventListener('click', () => window.api.collapse());
   el.btnOpenNote.addEventListener('click', openNote);
@@ -1762,6 +1963,7 @@ el.result.addEventListener('pointerleave', leaveEmptyGaze);
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    clearAvatarWild();
     clearTimeout(robot.petIdleTimer);
     clearTimeout(robot.petClipTimer);
     clearTimeout(robot.avatarIdleTimer);
