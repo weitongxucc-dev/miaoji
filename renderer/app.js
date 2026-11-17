@@ -44,6 +44,7 @@ const el = {
   agentChips: $('#agentChips'),
   btnAgentSend: $('#btnAgentSend'),
   trackList: $('#trackList'),
+  trackSearch: $('#trackSearch'),
   trackName: $('#trackName'),
   btnAddTrack: $('#btnAddTrack'),
   cfgReviewDaily: $('#cfgReviewDaily'),
@@ -99,6 +100,7 @@ const state = {
   trackFilter: '',
   search: '',
   captureTrack: '',
+  trackQuery: '',
   busy: false,
   expanded: false,
   clip: '',
@@ -2534,21 +2536,69 @@ function renderTrackList() {
   if (!el.trackList) return;
   const tracks = state.config?.tracks || [];
   const counts = {};
+  const lastUsed = {};
   for (const e of Object.values(state.entries)) {
-    if (e.track) counts[e.track] = (counts[e.track] || 0) + 1;
+    if (!e.track) continue;
+    counts[e.track] = (counts[e.track] || 0) + 1;
+    const at = new Date(e.lastAt || 0).getTime();
+    if (at > (lastUsed[e.track] || 0)) lastUsed[e.track] = at;
   }
+
+  // 方向多时才需要搜索；少于一屏时保持界面简洁
+  const showSearch = tracks.length >= 6;
+  if (el.trackSearch) {
+    el.trackSearch.classList.toggle('hidden', !showSearch);
+    if (!showSearch && state.trackQuery) {
+      state.trackQuery = '';
+      el.trackSearch.value = '';
+    }
+  }
+
   if (!tracks.length) {
     el.trackList.innerHTML = '<div class="review-empty-sub" style="padding:2px 0;">还没有方向。加一个，AI 会按它解释。</div>';
     return;
   }
-  el.trackList.innerHTML = tracks.map((t) => `
+
+  const rowHTML = (t) => `
     <div class="track-row">
       <div>
         <div class="t-name">${esc(t.name)}</div>
         ${counts[t.id] ? `<div class="t-desc">${counts[t.id]} 条词条</div>` : ''}
       </div>
       <button class="t-del" data-track-del="${esc(t.id)}">移除</button>
-    </div>`).join('');
+    </div>`;
+
+  const q = (state.trackQuery || '').trim().toLowerCase();
+  if (q) {
+    const matched = tracks.filter((t) => t.name.toLowerCase().includes(q));
+    el.trackList.innerHTML = matched.length
+      ? matched.map(rowHTML).join('')
+      : '<div class="track-empty">没有匹配的方向。</div>';
+    return;
+  }
+
+  // 超过一屏时，把最近用过的方向放前面，其余收进「其他方向」，避免一长排
+  if (tracks.length > 8) {
+    const recent = tracks
+      .filter((t) => lastUsed[t.id])
+      .sort((a, b) => lastUsed[b.id] - lastUsed[a.id])
+      .slice(0, 5);
+    const recentIds = new Set(recent.map((t) => t.id));
+    const others = tracks.filter((t) => !recentIds.has(t.id));
+    const recentHTML = recent.length
+      ? `<div class="track-group-label">最近使用</div>${recent.map(rowHTML).join('')}`
+      : '';
+    const othersHTML = others.length
+      ? `<details class="track-more">
+          <summary>其他方向 · ${others.length}</summary>
+          ${others.map(rowHTML).join('')}
+        </details>`
+      : '';
+    el.trackList.innerHTML = recentHTML + othersHTML;
+    return;
+  }
+
+  el.trackList.innerHTML = tracks.map(rowHTML).join('');
 }
 
 async function saveTracks(tracks, msg) {
@@ -2567,6 +2617,21 @@ async function saveTracks(tracks, msg) {
 
 function bindTracks() {
   if (!el.trackList) return;
+
+  if (el.trackSearch) {
+    el.trackSearch.addEventListener('input', () => {
+      state.trackQuery = el.trackSearch.value;
+      renderTrackList();
+    });
+    el.trackSearch.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && el.trackSearch.value) {
+        e.stopPropagation();
+        el.trackSearch.value = '';
+        state.trackQuery = '';
+        renderTrackList();
+      }
+    });
+  }
 
   el.btnAddTrack.addEventListener('click', async () => {
     const name = el.trackName.value.trim();
