@@ -526,13 +526,23 @@ ipcMain.handle('app:init', () => {
 
 ipcMain.handle('config:save', (_e, patch) => {
   if (!patch || typeof patch !== 'object') return { ok: false, error: '参数错误' };
-  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'tracks', 'reviewDaily', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop', 'clipWatch', 'clipWatchPaused', 'recommendSlot', 'weeklyAuto', 'weeklyLastAt', 'videoCookies'];
+  const allowed = ['apiKey', 'baseUrl', 'model', 'obsidianFile', 'obsidianEnabled', 'obsidianOnboarded', 'tracks', 'reviewDaily', 'hotThreshold', 'hotLimit', 'launchAtLogin', 'alwaysOnTop', 'clipWatch', 'clipWatchPaused', 'recommendSlot', 'weeklyAuto', 'weeklyLastAt', 'videoCookies', 'articleCookies', 'articleCookiesHost'];
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k];
   if ('videoCookies' in clean) {
     const browsers = ['edge', 'chrome', 'firefox', 'brave'];
     clean.videoCookies = browsers.includes(clean.videoCookies) ? clean.videoCookies : '';
   }
+  if ('articleCookiesHost' in clean) {
+    clean.articleCookiesHost = String(clean.articleCookiesHost || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .split('/')[0]
+      .replace(/[^a-z0-9.\-:]/g, '')
+      .slice(0, 120);
+  }
+  if ('articleCookies' in clean) clean.articleCookies = String(clean.articleCookies || '').trim().slice(0, 8000);
   const config = store.saveConfig(clean);
   if ('launchAtLogin' in clean) applyLaunchAtLogin(clean.launchAtLogin);
   if ('alwaysOnTop' in clean && win) win.setAlwaysOnTop(Boolean(clean.alwaysOnTop), 'floating');
@@ -623,7 +633,11 @@ ipcMain.handle('ai:query', async (_e, text, mode) => {
       explicitKey = store.clipKeyFor(v.url);
     } else if (/^https?:\/\/\S+$/i.test(input)) {
       // 链接 → 抓正文、摘要、术语标注，原文一起保存
-      const page = await extract.extractFromUrl(input);
+      // 受限站点可选带上用户自己填的 Cookie（只发给用户指定的域名）
+      const page = await extract.extractFromUrl(input, {
+        cookies: conf.articleCookies || '',
+        cookiesHost: conf.articleCookiesHost || ''
+      });
       fresh = await summarizeClip(page, conf);
       explicitKey = store.clipKeyFor(page.url);
     } else if (/[一-龥]/.test(input) && input.length >= 40 && !/[a-zA-Z]{4,}/.test(input)) {

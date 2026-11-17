@@ -304,6 +304,15 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
 .review-empty img { width: 88px; image-rendering: pixelated; }
 .review-empty-title { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--ink); }
 .review-empty-sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); line-height: 1.8; }
+.review-backlog {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-deep);
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+.review-all-btn { margin-top: 8px; }
+.review-grad-tag { background: var(--sunken); }
 
 /* ---------- 词头的方向选择 ---------- */
 .track-select {

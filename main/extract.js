@@ -81,6 +81,30 @@ function looksLocalHost(hostname) {
   return false;
 }
 
+/** 只有目标域名匹配用户填写的域名时，才带上 Cookie，避免泄露到其他站点 */
+function hostAllowed(hostname, allowed) {
+  const h = String(hostname || '').toLowerCase();
+  const a = String(allowed || '').trim().toLowerCase();
+  if (!a) return false;
+  return h === a || h.endsWith('.' + a);
+}
+
+/** "a=1; b=2" → [{name:'a',value:'1'}, ...] */
+function parseCookiePairs(raw) {
+  return String(raw || '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const i = part.indexOf('=');
+      if (i <= 0) return null;
+      const name = part.slice(0, i).trim();
+      const value = part.slice(i + 1).trim();
+      return name ? { name, value } : null;
+    })
+    .filter(Boolean);
+}
+
 /* 反爬验证页 / 404 / 付费墙识别：宁可报错，也不把验证页当文章存进来 */
 const BLOCK_SIGNS = [
   { re: /环境异常|完成验证后即可继续访问|请输入验证码|安全验证|访问过于频繁/, reason: '站点触发了环境验证（反爬），请稍后重试或换一个网络' },
@@ -144,6 +168,14 @@ async function renderExtract(rawUrl, opts = {}) {
 
   const { BrowserWindow } = electron;
   const timeoutMs = Math.max(10000, Number(opts.timeout) || 20000);
+  // 用户为受限站点配置的 Cookie 只注入到匹配的域名
+  let hostForCookies = '';
+  try {
+    hostForCookies = new URL(startUrl).hostname;
+  } catch {
+    hostForCookies = '';
+  }
+  const useCookies = Boolean(opts.cookies) && hostAllowed(hostForCookies, opts.cookiesHost);
   const win = new BrowserWindow({
     show: false,
     width: 1280,
@@ -221,9 +253,32 @@ async function renderExtract(rawUrl, opts = {}) {
           if (!settled) attempt(2500);
         }, 700);
       });
-      wc.loadURL(startUrl, { userAgent: UA }).catch(() => {
-        /* 加载失败留给超时/静态兜底 */
-      });
+
+      const load = () => {
+        wc.loadURL(startUrl, { userAgent: UA }).catch(() => {
+          /* 加载失败留给超时/静态兜底 */
+        });
+      };
+
+      if (useCookies) {
+        const pairs = parseCookiePairs(opts.cookies);
+        const origin = (() => {
+          try {
+            return new URL(startUrl).origin + '/';
+          } catch {
+            return startUrl;
+          }
+        })();
+        Promise.all(
+          pairs.map((p) =>
+            wc.session.cookies
+              .set({ url: origin, name: p.name, value: p.value, path: '/', secure: true, sameSite: 'no_restriction' })
+              .catch(() => {})
+          )
+        ).finally(load);
+      } else {
+        load();
+      }
     });
   } finally {
     try {
@@ -267,18 +322,18 @@ async function assertPublicHost(hostname) {
 
 function requestOnce(url, opts) {
   const mod = url.protocol === 'https:' ? https : http;
+  const headers = {
+    'User-Agent': UA,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br'
+  };
+  // 受限站点 Cookie 只发给用户指定的域名
+  if (opts.cookies && hostAllowed(url.hostname, opts.cookiesHost)) {
+    headers.Cookie = String(opts.cookies).slice(0, 8000);
+  }
   return new Promise((resolve, reject) => {
-    const req = mod.get(
-      url,
-      {
-        headers: {
-          'User-Agent': UA,
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br'
-        }
-      },
-      (res) => {
+    const req = mod.get(url, { headers }, (res) => {
         const chunks = [];
         let size = 0;
         res.on('data', (chunk) => {
@@ -397,6 +452,17 @@ function extractMeta(html) {
   return { title: extractTextFromHtml(title).slice(0, 160), publishedAt };
 }
 
+function loginHint(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  if (/(^|\.)zhihu\.com$/.test(host)) {
+    return '知乎拒绝了这个请求（403），它要求登录态。在设置 →「受限文章」里填 zhihu.com 和登录后的 Cookie，再试一次';
+  }
+  if (/(^|\.)mp\.weixin\.qq\.com$/.test(host)) {
+    return '公众号返回 403，可能是链接已过期或触发了验证。请在浏览器里重新打开这篇文章，复制新的链接';
+  }
+  return '';
+}
+
 async function fetchHtml(rawUrl, opts = {}) {
   let current = new URL(String(rawUrl || '').trim());
   if (!/^https?:$/.test(current.protocol)) throw new Error('只支持 http/https 链接');
@@ -406,7 +472,7 @@ async function fetchHtml(rawUrl, opts = {}) {
   let timeout = Number(opts.timeout) || DEFAULT_TIMEOUT;
 
   for (;;) {
-    const { res, body } = await requestOnce(current, { timeout });
+    const { res, body } = await requestOnce(current, { ...opts, timeout });
     const status = res.statusCode || 0;
     if ([301, 302, 303, 307, 308].includes(status) && res.headers.location) {
       redirects += 1;
@@ -417,7 +483,9 @@ async function fetchHtml(rawUrl, opts = {}) {
       continue;
     }
     if (status >= 400) {
-      if (status === 401 || status === 403) throw new Error(`站点拒绝访问（${status}），可能需要登录或触发了反爬`);
+      if (status === 401 || status === 403) {
+        throw new Error(loginHint(current.hostname) || `站点拒绝访问（${status}），可能需要登录或触发了反爬`);
+      }
       if (status === 404) throw new Error('页面不存在（404），检查一下链接');
       if (status === 429) throw new Error('访问太频繁（429），稍等一会儿再试');
       throw new Error(`网页返回 ${status}，可能无法访问`);
@@ -435,15 +503,21 @@ async function fetchHtml(rawUrl, opts = {}) {
  * 返回 { ok, url, title, site, publishedAt, excerpt, text, extractor }
  */
 async function extractFromUrl(rawUrl, opts = {}) {
+  const targetUrl = new URL(String(rawUrl || '').trim());
+  const targetHost = targetUrl.hostname.toLowerCase();
+  // 公众号文章是服务器直出 HTML，渲染层只会撞上「环境异常」验证页，直接走静态抓取
+  const staticFirst = /(^|\.)mp\.weixin\.qq\.com$/.test(targetHost);
   // 先试渲染解析
   let rendered = null;
   let renderError = null;
-  try {
-    rendered = await renderExtract(rawUrl, opts);
-  } catch (err) {
-    // 本机/局域网地址这类安全错误直接抛，不再走静态兜底
-    renderError = err;
-    if (err && /局域网|本机/.test(String(err.message))) throw err;
+  if (!staticFirst) {
+    try {
+      rendered = await renderExtract(rawUrl, opts);
+    } catch (err) {
+      // 本机/局域网地址这类安全错误直接抛，不再走静态兜底
+      renderError = err;
+      if (err && /局域网|本机/.test(String(err.message))) throw err;
+    }
   }
   if (rendered && rendered.text) {
     let text = String(rendered.text).trim();

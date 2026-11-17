@@ -49,6 +49,11 @@ const el = {
   cfgRecommend: $('#cfgRecommend'),
   cfgWeeklyAuto: $('#cfgWeeklyAuto'),
   cfgVideoCookies: $('#cfgVideoCookies'),
+  cfgArticleHost: $('#cfgArticleHost'),
+  cfgArticleCookies: $('#cfgArticleCookies'),
+  btnSaveArticleCookies: $('#btnSaveArticleCookies'),
+  btnClearArticleCookies: $('#btnClearArticleCookies'),
+  articleCookieNote: $('#articleCookieNote'),
   cfgKey: $('#cfgKey'),
   cfgBase: $('#cfgBase'),
   cfgModel: $('#cfgModel'),
@@ -1402,7 +1407,8 @@ function trackNameOf(trackId) {
 function dueEntries() {
   const now = Date.now();
   return Object.values(state.entries)
-    .filter((e) => !e.mastered && !e.graduated && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now)
+    // 毕业的词也会在 60/120/240 天后回来确认一次
+    .filter((e) => !e.mastered && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now)
     .sort((a, b) => new Date(a.nextReviewAt) - new Date(b.nextReviewAt));
 }
 
@@ -1418,10 +1424,11 @@ function renderReview() {
   const remaining = Math.max(0, (state.config.reviewDaily || 5) - s.doneToday);
   const due = dueEntries();
   const list = due.slice(0, remaining);
+  const backlog = due.length - list.length;
 
   if (!list.length) {
     const next = Object.values(state.entries)
-      .filter((e) => !e.mastered && !e.graduated && e.nextReviewAt)
+      .filter((e) => !e.mastered && e.nextReviewAt)
       .sort((a, b) => new Date(a.nextReviewAt) - new Date(b.nextReviewAt))[0];
     const done = s.doneToday > 0;
     el.reviewArea.innerHTML = `<div class="review-empty">
@@ -1440,14 +1447,17 @@ function renderReview() {
     <img src="assets/robot-idle.png" alt="">
     <div class="review-empty-title">${list.length} 个词到期</div>
     <div class="review-empty-sub">按今天的额度，这次回顾 ${list.length} 个。<br>先想它的意思，再翻面。</div>
-    <button class="review-flip-btn" data-review-start>开始回顾</button>
+    ${backlog > 0 ? `<p class="review-backlog">另有 ${backlog} 个已到期，积压会越滚越大。今天可以一次清完。</p>` : ''}
+    <button class="review-flip-btn" data-review-start>开始回顾${backlog > 0 ? '（按额度）' : ''}</button>
+    ${backlog > 0 ? `<button class="btn ghost sm review-all-btn" data-review-all>清积压 · 全部 ${due.length} 个</button>` : ''}
   </div>`;
 }
 
-function startReviewSession() {
+function startReviewSession(all) {
   const s = stats();
   const remaining = Math.max(0, (state.config.reviewDaily || 5) - s.doneToday);
-  const list = dueEntries().slice(0, remaining).map((e) => e.key);
+  const allDue = dueEntries();
+  const list = (all ? allDue : allDue.slice(0, remaining)).map((e) => e.key);
   if (!list.length) {
     renderReview();
     return;
@@ -1469,7 +1479,8 @@ function renderReviewCard() {
   }
 
   const track = trackNameOf(entry.track);
-  const trackChip = track ? `<span class="pos-tag">${esc(track)}</span>` : '';
+  const trackChip = (track ? `<span class="pos-tag">${esc(track)}</span>` : '')
+    + (entry.graduated && !entry.mastered ? '<span class="pos-tag review-grad-tag">毕业确认</span>' : '');
   const progress = `回顾 · ${session.idx + 1}/${session.ids.length}`;
 
   if (!session.flipped) {
@@ -1559,7 +1570,9 @@ function bindReview() {
     const btn = e.target.closest('button');
     if (!btn) return;
     if (btn.dataset.reviewStart !== undefined) {
-      startReviewSession();
+      startReviewSession(false);
+    } else if (btn.dataset.reviewAll !== undefined) {
+      startReviewSession(true);
     } else if (btn.dataset.reviewFlip !== undefined) {
       if (state.reviewSession) {
         state.reviewSession.flipped = true;
@@ -2402,6 +2415,14 @@ function fillSettings() {
   el.cfgRecommend.checked = Boolean(state.config.recommendSlot);
   el.cfgWeeklyAuto.checked = Boolean(state.config.weeklyAuto);
   if (el.cfgVideoCookies) el.cfgVideoCookies.value = state.config.videoCookies || '';
+  if (el.cfgArticleHost) el.cfgArticleHost.value = state.config.articleCookiesHost || '';
+  if (el.cfgArticleCookies) el.cfgArticleCookies.value = '';
+  if (el.articleCookieNote) {
+    const host = state.config.articleCookiesHost;
+    el.articleCookieNote.textContent = state.config.hasArticleCookies
+      ? `已保存 ${host || '受限站点'} 的登录 Cookie。重新填写会覆盖，留空并保存不会清除。`
+      : '还没有保存 Cookie。';
+  }
   el.cfgReviewDaily.value = state.config.reviewDaily || 5;
   el.dataDir.textContent = state.dataDir || '—';
   el.dataDir.title = state.dataDir || '';
@@ -3185,6 +3206,42 @@ function bind() {
     }
     state.config = r.config;
     toast(value ? '已开启：受限视频失败时会读取该浏览器的登录状态重试' : '已关闭：只抓取公开内容');
+  });
+
+  el.btnSaveArticleCookies.addEventListener('click', async () => {
+    const host = el.cfgArticleHost.value.trim();
+    const cookies = el.cfgArticleCookies.value.trim();
+    if (!host) {
+      toast('先填站点域名，例如 zhihu.com', 'warn');
+      el.cfgArticleHost.focus();
+      return;
+    }
+    if (!cookies && !state.config.hasArticleCookies) {
+      toast('把浏览器里的 Cookie 整段粘贴进来', 'warn');
+      el.cfgArticleCookies.focus();
+      return;
+    }
+    const patch = { articleCookiesHost: host };
+    if (cookies) patch.articleCookies = cookies;
+    const r = await window.api.saveConfig(patch);
+    if (!r.ok) {
+      toast(r.error || '保存失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    fillSettings();
+    toast(cookies ? `已保存：抓取 ${host} 时会带上登录 Cookie` : `已更新域名：${host}`);
+  });
+
+  el.btnClearArticleCookies.addEventListener('click', async () => {
+    const r = await window.api.saveConfig({ articleCookies: '', articleCookiesHost: '' });
+    if (!r.ok) {
+      toast(r.error || '清除失败', 'warn');
+      return;
+    }
+    state.config = r.config;
+    fillSettings();
+    toast('已清除受限站点的 Cookie');
   });
 
   el.btnChoose.addEventListener('click', async () => {

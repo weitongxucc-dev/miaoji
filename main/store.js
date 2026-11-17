@@ -33,7 +33,10 @@ const DEFAULTS = {
   weeklyAuto: false,
   weeklyLastAt: 0,
   // 视频平台登录状态：默认关闭；只在抓取失败、重试时读取本机浏览器 cookie
-  videoCookies: ''
+  videoCookies: '',
+  // 受限文章站的 Cookie：只对指定域名生效，加密存储
+  articleCookies: '',
+  articleCookiesHost: ''
 };
 
 // 复习阶梯：每次「想起来了」推进一档（天数），「没想起」回到第一档
@@ -70,6 +73,15 @@ function loadConfig() {
     }
   }
   delete conf.apiKeyEnc;
+
+  if (file.articleCookiesEnc && safeStorage.isEncryptionAvailable()) {
+    try {
+      conf.articleCookies = safeStorage.decryptString(Buffer.from(file.articleCookiesEnc, 'base64'));
+    } catch {
+      conf.articleCookies = '';
+    }
+  }
+  delete conf.articleCookiesEnc;
 
   // 开发/测试时可用环境变量指向临时生词本，避免污染真实库
   if (process.env.MIAOJI_VAULT_FILE) {
@@ -112,6 +124,13 @@ function saveConfig(patch) {
     }))
     .filter((t) => t.name);
   conf.reviewDaily = Math.max(1, Math.min(20, Math.round(Number(conf.reviewDaily) || DEFAULTS.reviewDaily)));
+  conf.articleCookies = String(conf.articleCookies || '').trim().slice(0, 8000);
+  conf.articleCookiesHost = String(conf.articleCookiesHost || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .split('/')[0]
+    .slice(0, 120);
 
   configCache = conf;
 
@@ -120,6 +139,10 @@ function saveConfig(patch) {
     out.apiKeyEnc = safeStorage.encryptString(conf.apiKey).toString('base64');
     delete out.apiKey;
   }
+  if (safeStorage.isEncryptionAvailable() && conf.articleCookies) {
+    out.articleCookiesEnc = safeStorage.encryptString(conf.articleCookies).toString('base64');
+  }
+  delete out.articleCookies;
   writeJsonAtomic(CONFIG_FILE, out);
   return publicConfig();
 }
@@ -145,7 +168,9 @@ function publicConfig() {
     recommendSlot: Boolean(conf.recommendSlot),
     weeklyAuto: Boolean(conf.weeklyAuto),
     weeklyLastAt: Number(conf.weeklyLastAt) || 0,
-    videoCookies: String(conf.videoCookies || '')
+    videoCookies: String(conf.videoCookies || ''),
+    hasArticleCookies: Boolean(String(conf.articleCookies || '').trim()),
+    articleCookiesHost: String(conf.articleCookiesHost || '')
   };
 }
 
@@ -172,6 +197,12 @@ function loadEntries() {
           const base = e.lastAt || new Date().toISOString();
           e.nextReviewAt = new Date(new Date(base).getTime() + REVIEW_INTERVALS[0] * 86400000).toISOString();
         }
+      }
+      // 旧版「毕业即退出队列」的词，补上长尾确认（60 天后第一次确认）
+      if (e.graduated && !e.mastered && !e.nextReviewAt && e.confirmLevel === undefined) {
+        migrated = true;
+        e.confirmLevel = 0;
+        e.nextReviewAt = new Date(Date.now() + 60 * 86400000).toISOString();
       }
     }
     if (migrated) persistEntries();
@@ -332,6 +363,25 @@ function recordReview(key, grade) {
   entry.reviews = Array.isArray(entry.reviews) ? entry.reviews : [];
   entry.reviews.push({ at: new Date(now).toISOString(), grade: g });
 
+  // 毕业后的长尾确认：毕业后 60 / 120 / 240 天各确认一次，避免「毕业即遗忘」
+  if (entry.graduated && !entry.mastered) {
+    if (g === 2) {
+      entry.confirmLevel = Math.min(3, (Number(entry.confirmLevel) || 0) + 1);
+      const gaps = { 1: 120, 2: 240 };
+      const days = gaps[entry.confirmLevel];
+      entry.nextReviewAt = days ? new Date(now + days * 86400000).toISOString() : null;
+    } else {
+      // 确认时想不起来：回到复习队列重新走
+      entry.graduated = false;
+      entry.confirmLevel = 0;
+      entry.fuzzyStreak = 0;
+      entry.stage = g === 0 ? 0 : 2;
+      entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[entry.stage] * 86400000).toISOString();
+    }
+    persistEntries();
+    return entry;
+  }
+
   if (g === 0) {
     entry.fuzzyStreak = 0;
     entry.stage = 0;
@@ -345,7 +395,8 @@ function recordReview(key, grade) {
       entry.stage += 1;
       if (entry.stage >= REVIEW_INTERVALS.length) {
         entry.graduated = true;
-        entry.nextReviewAt = null;
+        entry.confirmLevel = 0;
+        entry.nextReviewAt = new Date(now + 60 * 86400000).toISOString();
       } else {
         entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[entry.stage] * 86400000).toISOString();
       }
@@ -358,7 +409,9 @@ function recordReview(key, grade) {
     entry.stage = Number.isInteger(entry.stage) ? entry.stage + 1 : 1;
     if (entry.stage >= REVIEW_INTERVALS.length) {
       entry.graduated = true;
-      entry.nextReviewAt = null;
+      entry.confirmLevel = 0;
+      // 毕业后先安排 60 天后的第一次确认
+      entry.nextReviewAt = new Date(now + 60 * 86400000).toISOString();
     } else {
       entry.nextReviewAt = new Date(now + REVIEW_INTERVALS[entry.stage] * 86400000).toISOString();
     }
@@ -394,7 +447,8 @@ function reviewState(reviewDaily) {
     }
   }
   const due = all
-    .filter((e) => !e.mastered && !e.graduated && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now)
+    // 毕业的词也保留长尾确认（nextReviewAt 为 60/120/240 天后的确认时间）
+    .filter((e) => !e.mastered && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now)
     .sort((a, b) => new Date(a.nextReviewAt) - new Date(b.nextReviewAt));
   const collected = all.length;
   const reviewedWords = all.filter((e) => Array.isArray(e.reviews) && e.reviews.length > 0).length;

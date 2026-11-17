@@ -337,6 +337,26 @@
           </section>
 
           <section class="settings-group">
+            <h3 class="settings-group-title">受限文章</h3>
+            <div class="field two">
+              <div>
+                <label for="cfgArticleHost">站点域名</label>
+                <input id="cfgArticleHost" type="text" placeholder="zhihu.com" spellcheck="false" autocomplete="off">
+              </div>
+              <div>
+                <label for="cfgArticleCookies">登录 Cookie</label>
+                <input id="cfgArticleCookies" type="password" placeholder="粘贴后点保存" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div class="obs-actions">
+              <button id="btnSaveArticleCookies" class="link-btn sm">保存</button>
+              <button id="btnClearArticleCookies" class="link-btn sm">清除</button>
+            </div>
+            <p id="articleCookieNote" class="help">还没有保存 Cookie。</p>
+            <p class="help">有些站点（如知乎）不登录就拒绝抓取。填好域名后，只有抓取这个域名时才会带上 Cookie；Cookie 在本机加密保存、不上传，保存后不会回显。取法：浏览器登录该站后按 F12 → 网络（Network）→ 点任意请求 → 复制请求头里的 Cookie 整段。</p>
+          </section>
+
+          <section class="settings-group">
             <h3 class="settings-group-title">监听与建议</h3>
             <label class="switch">
               <input type="checkbox" id="cfgClipWatch">
