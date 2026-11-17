@@ -33,7 +33,7 @@
   --hover: #EFE7DA;
   --hover-2: #E9E0D1;
   --on-accent: #FFFCF5;
-  --placeholder: #7D7569;
+  --placeholder: #6B6357;
   --danger-hover: #F2D6CF;
   --warn-line: #C98E82;
 
@@ -555,12 +555,6 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink);
-}
-.headword:not(.is-sentence)::before {
-  content: "› ";
-  color: var(--accent);
-  font-weight: 400;
-  letter-spacing: 0;
 }
 .headword.is-sentence {
   font-family: var(--font-mono);
@@ -1386,3 +1380,243 @@ body.dragging .bubble { opacity: 0; }
   color: var(--accent-deep);
 }
 .bubble.quip::before { content: "> "; color: var(--accent); }
+
+/* ---------- 第一批结构修复：文字导航 / 更多 / 词库筛选 ---------- */
+
+.panel-head { position: relative; z-index: 20; }
+
+.nav-text {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+.nav-text:hover { color: var(--ink); }
+.nav-text.active { color: var(--ink); }
+.nav-text.active::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 3px;
+  height: 2px;
+  background: var(--accent);
+}
+.nav-text .nav-badge {
+  position: static;
+  top: auto;
+  right: auto;
+  min-width: 14px;
+  height: 14px;
+  margin-left: 1px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 14px;
+  text-align: center;
+}
+.nav-text .nav-badge.hidden { display: none; }
+
+.more-wrap { position: relative; }
+.more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 96px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-2);
+  box-shadow: 0 8px 20px rgba(74, 58, 38, 0.16);
+}
+.more-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.more-menu button:hover { background: var(--hover); color: var(--ink); }
+.more-menu button.active { color: var(--accent-deep); }
+
+.composer-track-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
+  margin: 0 0 3px;
+}
+.composer-track-row .capture-track > span { font-size: 11px; }
+.composer-track-row .capture-track select {
+  max-width: 180px;
+  padding: 1px 3px;
+  font-size: 11px;
+}
+.composer-track-row .capture-track.is-empty select { color: var(--muted); }
+.capture-track-add {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent-deep);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  cursor: pointer;
+}
+.capture-track-add:hover { text-decoration: underline; }
+
+.lib-type-row { display: flex; align-items: center; margin-top: 7px; }
+.lib-type-row .seg { flex: 1 1 auto; margin-top: 0; }
+.lib-filter-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.lib-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.lib-select > span {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+.lib-select select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 4px;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+.lib-select select:focus { border-color: var(--accent); outline: none; }
+
+.hot-row { grid-template-columns: minmax(0, 1fr) 14px; }
+.hot-word {
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.hot-row.is-long .hot-word {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.lib-kind {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.lib-kind::before { content: "["; }
+.lib-kind::after { content: "]"; }
+.hot-row.mastered .hot-word { text-decoration: line-through; }
+.thread-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+  align-self: center;
+}
+.hot-empty img { display: none; }
+
+.example .ex-idx { display: none; }
+.ex { grid-template-columns: minmax(0, 1fr); }
+
+.kind-tag {
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+.kind-tag::before { content: "["; }
+.kind-tag::after { content: "]"; }
+.headword.is-title {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+.headword.is-term { font-family: var(--font-sans); }
+
+.review-track {
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+.review-term {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.stats-anchor {
+  margin: 0 0 4px;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.stats-anchor b { color: var(--accent-deep); }
+.stats-anchor-action { margin: 0 0 8px; }
+
+.settings-more { margin-top: 6px; }
+.settings-more > summary {
+  padding: 3px 0;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  cursor: pointer;
+  list-style: none;
+}
+.settings-more > summary::-webkit-details-marker { display: none; }
+.settings-more > summary::before { content: "＋ "; color: var(--accent); }
+.settings-more[open] > summary::before { content: "－ "; }
+.settings-more .field { margin-top: 4px; }
+
+.count-tag::before,
+.count-tag::after { content: none; }
+#view-review .review-stats-line {
+  display: block;
+  padding: 5px 0 0;
+}
+
+/* 去掉终端装饰，只保留输入框一个 › */
+.brand-text h1::before,
+.review-progress::before,
+.track-row .t-name::before,
+.view-title::before,
+.empty h3::before,
+.sec-label::before,
+.settings-group-title::before,
+.bubble::before,
+.bubble.quip::before,
+.weekly-label::before { content: none; }
+.review-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sense-list li { grid-template-columns: minmax(0, 1fr); }
+#view-review { padding: 10px 12px 0; }
+.ex { display: block; }

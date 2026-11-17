@@ -14,19 +14,23 @@ const el = {
   headAvatar: $('#headAvatar'),
   headStat: $('#headStat'),
   btnCollapse: $('#btnCollapse'),
+  btnMore: $('#btnMore'),
+  moreMenu: $('#moreMenu'),
   btnOpenNote: $('#btnOpenNote'),
   composerWrap: $('#composerWrap'),
   input: $('#input'),
   btnParse: $('#btnParse'),
   modeSeg: $('#modeSeg'),
   captureTrack: $('#captureTrack'),
+  captureTrackAdd: $('#captureTrackAdd'),
   clipChip: $('#clipChip'),
   result: $('#result'),
   hotSearch: $('#hotSearch'),
-  hotSeg: $('#hotSeg'),
+  libTypeSeg: $('#libTypeSeg'),
+  libTrack: $('#libTrack'),
+  libTrackWrap: $('#libTrackWrap'),
+  libScope: $('#libScope'),
   hotList: $('#hotList'),
-  btnHot: $('#btnHot'),
-  hotCount: $('#hotCount'),
   hotHeadCount: $('#hotHeadCount'),
   btnReview: $('#btnReview'),
   reviewDue: $('#reviewDue'),
@@ -42,7 +46,6 @@ const el = {
   trackList: $('#trackList'),
   trackName: $('#trackName'),
   btnAddTrack: $('#btnAddTrack'),
-  trackPresets: $('#trackPresets'),
   cfgReviewDaily: $('#cfgReviewDaily'),
   cfgClipWatch: $('#cfgClipWatch'),
   cfgClipPause: $('#cfgClipPause'),
@@ -91,7 +94,9 @@ const state = {
   installDir: '',
   version: '',
   tab: 'jot',
-  filter: 'hot',
+  filter: 'all',
+  typeFilter: 'term',
+  trackFilter: '',
   search: '',
   captureTrack: '',
   busy: false,
@@ -187,8 +192,7 @@ function meaningHTML(text) {
   if (!raw) return '';
   const parts = raw.split(/\s*[；;]\s*/).map((s) => s.trim()).filter(Boolean);
   if (parts.length < 2 || parts.length > 5) return `<p class="meaning">${richInline(raw)}</p>`;
-  return `<ol class="sense-list">${parts.map((p, i) => `<li>
-    <span class="sense-idx">${pad2(i + 1)}</span>
+  return `<ol class="sense-list">${parts.map((p) => `<li>
     <span class="sense-text">${richInline(p)}</span>
   </li>`).join('')}</ol>`;
 }
@@ -786,9 +790,9 @@ function renderStats() {
   if (!state.config) return;
   const s = stats();
   el.headStat.textContent = s.total === 0
-    ? '今天还没查词'
+    ? '今天还没收录'
     : s.today === 0
-      ? `今天还没查词 · 累计 ${s.total}`
+      ? `今天还没收录 · 累计 ${s.total}`
       : `今天 ${s.today} · 累计 ${s.total}`;
   // 回顾页头部的差距统计跟全站状态走，复习打完分立即反映
   if (el.reviewStats) {
@@ -811,7 +815,7 @@ function renderStats() {
     el.bubble.classList.remove('hidden');
   } else if (s.total === 0) {
     el.bubble.classList.remove('clipwatch');
-    el.petCount.textContent = '查词';
+    el.petCount.textContent = '收术语';
     el.bubble.classList.remove('hidden');
   } else {
     el.bubble.classList.add('hidden');
@@ -822,15 +826,6 @@ function renderStats() {
     el.reviewDue.classList.remove('hidden');
   } else {
     el.reviewDue.classList.add('hidden');
-  }
-
-  if (s.hot > 0) {
-    el.hotCount.textContent = String(s.hot);
-    el.hotCount.classList.remove('hidden');
-    if (el.btnHot) el.btnHot.setAttribute('aria-label', `热词，${s.hot} 个`);
-  } else {
-    el.hotCount.classList.add('hidden');
-    if (el.btnHot) el.btnHot.setAttribute('aria-label', '热词');
   }
 }
 
@@ -843,6 +838,30 @@ function entryGist(e) {
 function countPill(e) {
   const n = e.count || 1;
   return `<span class="count-pill${n <= 1 ? ' is-new' : ''}">${n <= 1 ? 'NEW' : n + '次'}</span>`;
+}
+
+const KIND_INFO = {
+  term: { label: '术语', group: 'term' },
+  word: { label: '词条', group: 'words' },
+  sentence: { label: '句子', group: 'words' },
+  lookup: { label: '中译英', group: 'words' },
+  clip: { label: '剪藏', group: 'clip' },
+  note: { label: '闪念', group: 'note' }
+};
+
+function kindInfo(e) {
+  if (e && e.kind === 'clip' && e.source && e.source.type === 'video') {
+    return { label: '视频', group: 'clip' };
+  }
+  return KIND_INFO[e && e.kind] || KIND_INFO.word;
+}
+
+function kindLabel(e) {
+  return kindInfo(e).label;
+}
+
+function kindTagHTML(e) {
+  return `<span class="kind-tag">${esc(kindLabel(e))}</span>`;
 }
 
 function tags(list) {
@@ -859,16 +878,17 @@ function originalHTML(text) {
 
 function basicsZone(e) {
   const isSentence = e.kind === 'sentence';
+  const isTerm = e.kind === 'term';
   let body = '';
 
   if (isSentence) {
     body += `<div class="rich-text sentence-trans">${richBlock(e.sentence_translation)}</div>`;
     if (e.key_points && e.key_points.length) {
-      body += `<div class="sec-label"><span>要点</span><b>${pad2(e.key_points.length)}</b></div>
+      body += `<div class="sec-label"><span>结构</span><b>${pad2(e.key_points.length)}</b></div>
         <ul class="point-list">${e.key_points.map((p) => `<li>${richInline(p)}</li>`).join('')}</ul>`;
     }
     if (e.key_words && e.key_words.length) {
-      body += `<div class="sec-label"><span>关键词</span><b>${pad2(e.key_words.length)}</b></div>
+      body += `<div class="sec-label"><span>用法</span><b>${pad2(e.key_words.length)}</b></div>
         <ul class="kw-list">${e.key_words.map((k) => `<li><b>${esc(k.word)}</b>${k.meaning ? ' · ' + esc(k.meaning) : ''}</li>`).join('')}</ul>`;
     }
     if (e.note) {
@@ -882,10 +902,9 @@ function basicsZone(e) {
     if (e.definition_en) body += `<p class="def-en">${richInline(e.definition_en)}</p>`;
 
     if (e.examples && e.examples.length) {
-      body += `<div class="sec-label"><span>例句</span><b>${pad2(e.examples.length)}</b></div>
-        <div class="examples">${e.examples.map((x, i) => `
+      body += `<div class="sec-label"><span>${isTerm ? '领域例句' : '例句'}</span><b>${pad2(e.examples.length)}</b></div>
+        <div class="examples">${e.examples.map((x) => `
           <div class="ex">
-            <span class="ex-idx">${pad2(i + 1)}</span>
             <div>
               <p class="ex-en">${highlightWord(x.en, e.word)}</p>
               ${x.zh ? `<p class="ex-zh">${richInline(x.zh)}</p>` : ''}
@@ -907,10 +926,12 @@ function basicsZone(e) {
     }
 
     if (e.memory) {
-      body += `<div class="memory">${icon('i-bulb', 'sm')}<span>${richInline(e.memory)}</span></div>`;
+      body += `<div class="sec-label"><span>${isTerm ? '为什么重要' : '记忆'}</span></div>
+        <div class="memory">${icon('i-bulb', 'sm')}<span>${richInline(e.memory)}</span></div>`;
     }
     if (e.note) {
-      body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
+      body += `<div class="sec-label"><span>${isTerm ? '常见误解' : '注意'}</span></div>
+        <p class="note-line"><span>${richInline(e.note)}</span></p>`;
     }
   }
 
@@ -930,21 +951,22 @@ function originHasContent(o) {
 function originZone(e) {
   const o = e.origin || {};
   const isSentence = e.kind === 'sentence';
+  const isTerm = e.kind === 'term';
   let body = '';
 
   if (!originHasContent(o)) {
     body = `<div class="missing-origin">
-      <p>这条记录还没有脉络资料。重新解析一次，让 AI 补上词源、历史演变和关联场景。</p>
+      <p>这条记录还没有脉络资料。重新解析一次，让 AI 补上背景、上下文和关联概念。</p>
       <button class="btn sm ghost" data-reparse>${icon('i-repeat')}重新解析</button>
     </div>`;
   } else {
     const facts = [];
-    if (o.root) facts.push(`<div class="fact"><b>${isSentence ? '出处' : '词源'}</b><span>${esc(o.root)}</span></div>`);
+    if (o.root) facts.push(`<div class="fact"><b>${isSentence || isTerm ? '出处' : '词源'}</b><span>${esc(o.root)}</span></div>`);
     if (o.first_use) facts.push(`<div class="fact"><b>最早</b><span>${esc(o.first_use)}</span></div>`);
     if (facts.length) body += `<div class="origin-facts">${facts.join('')}</div>`;
 
     if (o.story) {
-      body += `<div class="sec-label"><span>${isSentence ? '语境' : '脉络'}</span></div>
+      body += `<div class="sec-label"><span>${isSentence ? '语境' : isTerm ? '背景' : '脉络'}</span></div>
         <div class="rich-text origin-story">${richBlock(o.story)}</div>`;
     }
 
@@ -967,7 +989,7 @@ function originZone(e) {
     }
 
     if (o.related && o.related.length) {
-      body += `<div class="sec-label"><span>相关</span></div><div class="related-row">${tags(o.related)}</div>`;
+      body += `<div class="sec-label"><span>${isTerm ? '相关概念' : '相关'}</span></div><div class="related-row">${tags(o.related)}</div>`;
     }
   }
 
@@ -1065,14 +1087,14 @@ function followHTML(e) {
 
 function dossierHTML(e) {
   const isSentence = e.kind === 'sentence';
+  const isTerm = e.kind === 'term';
   const isClip = e.kind === 'clip';
   const isNote = e.kind === 'note';
   const isLookup = e.kind === 'lookup';
-  const isLongHead = isSentence || isClip || isNote;
-  const kindTag = { clip: '剪藏', note: '闪念', lookup: '反查' }[e.kind] || '';
+  const isLongHead = isSentence || isClip || isNote || isLookup;
   const tracks = state.config?.tracks || [];
   const meta = [];
-  if (kindTag) meta.push(`<span class="pos-tag">${kindTag}</span>`);
+  meta.push(kindTagHTML(e));
   if (e.source && e.source.type === 'video') {
     const bits = ['🎬'];
     if (e.source.author) bits.push(esc(e.source.author));
@@ -1102,8 +1124,12 @@ function dossierHTML(e) {
     : isNote
       ? [{ id: 0, label: '整理' }, { id: 1, label: '原文' }, { id: 2, label: '追问' }]
       : isLookup
-        ? [{ id: 0, label: '释义' }, { id: 1, label: '辨析' }, { id: 2, label: '追问' }]
-        : [{ id: 0, label: '释义' }, { id: 1, label: '脉络' }, { id: 2, label: '追问' }];
+        ? [{ id: 0, label: '英文表达' }, { id: 1, label: '备选' }, { id: 2, label: '追问' }]
+        : isTerm
+          ? [{ id: 0, label: '定义' }, { id: 1, label: '语境' }, { id: 2, label: '追问' }]
+          : isSentence
+            ? [{ id: 0, label: '翻译' }, { id: 1, label: '语境' }, { id: 2, label: '追问' }]
+            : [{ id: 0, label: '释义' }, { id: 1, label: '词源' }, { id: 2, label: '追问' }];
   const hasThread = Array.isArray(e.thread) && e.thread.length > 0;
   const zoneStack = isClip
     ? clipBasicsZone(e) + clipOriginalZone(e) + followHTML(e)
@@ -1117,10 +1143,10 @@ function dossierHTML(e) {
     <header class="dossier-head">
       <div class="dossier-top">
         <div class="word-wrap">
-          <h2 class="headword${isLongHead ? (isSentence ? ' is-sentence' : ' is-title') : ''}"${isLongHead ? ` title="${esc(e.word)}"` : ''}>${isSentence ? '<span class="sentence-flag">句</span>' + esc(e.word) : esc(e.word)}</h2>
+          <h2 class="headword${isSentence ? ' is-sentence' : isTerm ? ' is-term' : isLongHead ? ' is-title' : ''}">${esc(e.word)}</h2>
         </div>
         <div class="dossier-tools">
-          <button class="more-btn" data-new title="查新词" aria-label="查新词">${icon('i-plus')}</button>
+          <button class="more-btn" data-new title="收录新术语" aria-label="收录新术语">${icon('i-plus')}</button>
           ${countPill(e)}
           <button class="more-btn" data-more title="词条操作" aria-label="词条操作">${icon('i-more')}</button>
         </div>
@@ -1130,7 +1156,6 @@ function dossierHTML(e) {
     <nav class="zone-tabs" aria-label="内容分区">
       ${zones.map((z) => `
         <button class="zone-tab${state.zone === z.id ? ' active' : ''}" data-zone="${z.id}">
-          <span class="num">0${z.id + 1}</span>
           <span class="lbl">${z.label}</span>
           ${z.id === 2 && hasThread ? '<span class="follow-dot"></span>' : ''}
         </button>`).join('')}
@@ -1205,7 +1230,7 @@ function lookupAltZone(e) {
   const alts = e.alternatives || [];
   let body = '';
   if (alts.length) {
-    body += `<div class="sec-label"><span>备选表达</span><b>${pad2(alts.length)}</b></div>
+    body += `<div class="sec-label"><span>备选与语体差别</span><b>${pad2(alts.length)}</b></div>
       <ul class="alt-list">${alts.map((a) => `
         <li><b>${esc(a.en)}</b>${a.nuance ? `<span>${esc(a.nuance)}</span>` : ''}</li>`).join('')}</ul>`;
   }
@@ -1230,10 +1255,10 @@ function renderEmpty() {
     <div class="empty-bot-body" id="emptyBotBody">
       <img id="emptyBotImg" class="empty-bot" src="assets/robot-idle.png" alt="">
     </div>
-    <h3>${needKey ? '先填一个 API Key' : '把词丢进来'}</h3>
+    <h3>${needKey ? '先填一个 API Key' : '进入一个新领域，从收下第一个术语开始'}</h3>
     <p>${needKey
-      ? '秒记用 DeepSeek 解析词义、词源和技术脉络，Key 只存在你这台电脑上。'
-      : '单词、句子、网页链接、一段随手记都行。理解、整理和复习，一次做完，并自动写进 Obsidian。'}</p>
+      ? '秒记用 DeepSeek 按当前方向解释术语，Key 只存在你这台电脑上。'
+      : '术语、单词、句子、链接或一段想法都行。按当前方向解释，并自动排进复习。'}</p>
     ${needKey
       ? `<div class="recent-row"><button class="recent-chip warn" data-settings>去设置 API Key</button></div>`
       : ''}
@@ -1249,10 +1274,9 @@ function renderEmpty() {
 function renderLoading(text) {
   stopEmptyRobot();
   el.result.innerHTML = `<div class="state-card">
-    <img class="state-bot" src="assets/robot-think.png" alt="">
     <p class="state-title">正在解析 <b>${esc(truncate(text, 30))}</b></p>
     <div class="loader"><i></i><i></i><i></i><i></i><i></i></div>
-    <p class="help">释义、词源脉络和新追问会一起准备好</p>
+    <p class="help">定义、领域例句和追问建议会一起准备好</p>
   </div>`;
   setHeadAvatar('think');
   setPetMode('think');
@@ -1324,30 +1348,65 @@ function scrollThreadBottom() {
 
 /* ---------------- 热词 ---------------- */
 
-function hotItemHTML(e, idx) {
-  const isSentence = e.kind === 'sentence';
+function hotItemHTML(e) {
+  const info = kindInfo(e);
   const meaning = entryGist(e);
   const mastered = e.mastered ? ' mastered' : '';
   const tn = trackNameOf(e.track);
-  return `<button class="hot-row${isSentence ? ' is-sentence' : ''}${mastered}" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? ' · ' + esc(tn) : ''}">
-    <span class="idx">${pad2(idx + 1)}</span>
+  const isLong = info.group !== 'term' && e.kind !== 'word';
+  const bits = [];
+  if (tn) bits.push(`<span class="hot-track">${esc(tn)}</span>`);
+  if (e.kind === 'clip') {
+    if (e.source && e.source.site) bits.push(`<span>${esc(e.source.site)}</span>`);
+    if (e.terms && e.terms.length) bits.push(`<span>${e.terms.length} 个术语</span>`);
+  } else if (e.kind === 'note') {
+    bits.push(`<span>${fmtShort(e.lastAt)}</span>`);
+  } else {
+    bits.push(`<span>${e.count || 1} 次</span>`);
+  }
+  const threadDot = Array.isArray(e.thread) && e.thread.length
+    ? '<span class="thread-dot" title="有追问"></span>'
+    : '';
+  return `<button class="hot-row${isLong ? ' is-long' : ''}${mastered}" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? ' · ' + esc(tn) : ''}">
     <span class="hot-main">
       <span class="hot-word-line">
-        <span class="hot-word">${esc(isSentence ? truncate(e.word, 64) : e.word)}</span>
-        <span class="hot-count">${e.count || 1}</span>
-        ${e.mastered ? '<span class="hot-count">✓</span>' : ''}
+        <span class="lib-kind">${esc(info.label)}</span>
+        <span class="hot-word">${esc(e.word)}</span>
       </span>
-      <span class="hot-meaning">${esc(truncate(meaning, 58))}</span>
-      <span class="hot-meta">${tn ? `<span class="hot-track">${esc(tn)}</span>` : ''}<span>${fmtShort(e.lastAt)}</span><span>${(e.thread && e.thread.length) ? '有追问' : '未追问'}</span></span>
+      <span class="hot-meaning">${esc(meaning)}</span>
+      <span class="hot-meta">${bits.join('')}${threadDot}</span>
     </span>
     <span class="chev">${icon('i-chevron')}</span>
   </button>`;
 }
 
+const LIB_UNITS = { term: '个术语', words: '条', clip: '条', note: '条' };
+
+function renderLibraryTracks() {
+  if (!el.libTrack) return;
+  const tracks = state.config?.tracks || [];
+  const hasNoTrack = Object.values(state.entries).some((e) => !e.track);
+  let current = '';
+  if (state.trackFilter === '__none' && hasNoTrack) current = '__none';
+  else if (tracks.some((t) => t.id === state.trackFilter)) current = state.trackFilter;
+  state.trackFilter = current;
+  if (el.libTrackWrap) el.libTrackWrap.classList.toggle('hidden', !tracks.length);
+  if (!tracks.length) return;
+  el.libTrack.innerHTML = [
+    '<option value="">全部</option>',
+    ...tracks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`),
+    hasNoTrack ? '<option value="__none">未设方向</option>' : ''
+  ].join('');
+  el.libTrack.value = current;
+}
+
 function renderHot() {
   if (!state.config) return;
   const q = state.search.trim().toLowerCase();
-  let list = Object.values(state.entries).filter((e) => {
+  let list = Object.values(state.entries).filter((e) => kindInfo(e).group === state.typeFilter);
+  if (state.trackFilter === '__none') list = list.filter((e) => !e.track);
+  else if (state.trackFilter) list = list.filter((e) => e.track === state.trackFilter);
+  list = list.filter((e) => {
     if (!q) return true;
     const hay = [e.word, e.meaning_zh, e.sentence_translation, e.summary, e.memory, e.note,
       (e.terms || []).map((t) => t.word + ' ' + t.meaning).join(' ')].join(' ').toLowerCase();
@@ -1355,7 +1414,7 @@ function renderHot() {
   });
 
   if (state.filter === 'hot') {
-    list = list.filter((e) => !e.mastered && (e.count || 1) >= state.config.hotThreshold);
+    list = list.filter((e) => !e.mastered && (e.count || 1) >= (state.config.hotThreshold || 3));
     list.sort((a, b) => (b.count || 0) - (a.count || 0) || new Date(b.lastAt) - new Date(a.lastAt));
   } else if (state.filter === 'mastered') {
     list = list.filter((e) => e.mastered);
@@ -1364,31 +1423,33 @@ function renderHot() {
     list.sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt));
   }
 
-  el.hotHeadCount.textContent = String(list.length);
+  if (el.hotHeadCount) {
+    el.hotHeadCount.textContent = `${list.length} ${LIB_UNITS[state.typeFilter] || '条'}`;
+  }
 
   if (!list.length) {
     const searching = Boolean(state.search.trim());
+    const noun = state.typeFilter === 'term' ? '术语' : '词条';
     const msg = searching
-      ? '没有匹配的词条。'
+      ? `没有匹配的${noun}。`
       : state.filter === 'hot'
-        ? `还没有热词。<br>同一个词查询满 <b>${state.config.hotThreshold}</b> 次就会出现在这里。`
+        ? `还没有热词。同一条查询满 <b>${state.config.hotThreshold || 3}</b> 次就会出现在这里。`
         : state.filter === 'mastered'
-          ? '还没有标记为已掌握的词。'
-          : '还没有记录。<br>回到「查词」记下第一个词吧。';
+          ? '还没有标记为已掌握的词条。'
+          : `还没有${state.typeFilter === 'term' ? '术语' : '记录'}。<br>去收录第一条吧。`;
     const action = searching
       ? '<button class="btn sm ghost" data-clear-search>清除搜索</button>'
-      : state.filter === 'mastered'
-        ? '<button class="btn sm ghost" data-all-words>查看全部词条</button>'
-        : '<button class="btn sm ghost" data-go-jot>去查一个词</button>';
+      : state.filter === 'mastered' || state.trackFilter
+        ? '<button class="btn sm ghost" data-all-words>查看全部</button>'
+        : '<button class="btn sm ghost" data-go-jot>去收录</button>';
     el.hotList.innerHTML = `<div class="hot-empty">
-      <img src="assets/robot-think.png" alt="">
       <div>${msg}</div>
       ${action}
     </div>`;
     return;
   }
 
-  el.hotList.innerHTML = list.map((e, i) => hotItemHTML(e, i)).join('');
+  el.hotList.innerHTML = list.map(hotItemHTML).join('');
 }
 
 function renderCaptureTrack() {
@@ -1396,18 +1457,20 @@ function renderCaptureTrack() {
   const tracks = state.config?.tracks || [];
   const current = tracks.some((t) => t.id === state.captureTrack) ? state.captureTrack : '';
   state.captureTrack = current;
-  el.captureTrack.innerHTML = [
-    '<option value="">自动</option>',
-    ...tracks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`)
-  ].join('');
+  el.captureTrack.disabled = !tracks.length;
+  el.captureTrack.innerHTML = tracks.length
+    ? ['<option value="">自动判断</option>', ...tracks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`)].join('')
+    : '<option value="">未设方向</option>';
   el.captureTrack.value = current;
+  if (el.captureTrackAdd) el.captureTrackAdd.classList.toggle('hidden', tracks.length > 0);
   const wrap = el.captureTrack.closest('.capture-track');
-  if (wrap) wrap.classList.toggle('hidden', !tracks.length);
+  if (wrap) wrap.classList.toggle('is-empty', !tracks.length);
 }
 
 function renderAll() {
   renderStats();
   renderCaptureTrack();
+  renderLibraryTracks();
   if (state.tab === 'hot') renderHot();
   if (state.tab === 'review') renderReview();
 }
@@ -1453,8 +1516,7 @@ function renderReview() {
       .sort((a, b) => new Date(a.nextReviewAt) - new Date(b.nextReviewAt))[0];
     const done = s.doneToday > 0;
     el.reviewArea.innerHTML = `<div class="review-empty">
-      <img src="assets/robot-${done ? 'happy' : 'idle'}.png" alt="">
-      <div class="review-empty-title">${done ? '今天的回顾完成了' : '今天没有到期的词'}</div>
+      <div class="review-empty-title">${done ? '今天的回顾完成了' : '今天没有到期的词条'}</div>
       <div class="review-empty-sub">${
         next
           ? `下一个到期：${esc(truncate(next.word, 24))} · ${fmtShort(next.nextReviewAt)}`
@@ -1465,12 +1527,11 @@ function renderReview() {
   }
 
   el.reviewArea.innerHTML = `<div class="review-done">
-    <img src="assets/robot-idle.png" alt="">
-    <div class="review-empty-title">${list.length} 个词到期</div>
-    <div class="review-empty-sub">按今天的额度，这次回顾 ${list.length} 个。<br>先想它的意思，再翻面。</div>
-    ${backlog > 0 ? `<p class="review-backlog">另有 ${backlog} 个已到期，积压会越滚越大。今天可以一次清完。</p>` : ''}
+    <div class="review-empty-title">${list.length} 条待回顾</div>
+    <div class="review-empty-sub">按今天的额度，这次回顾 ${list.length} 条。<br>先想它的意思，再翻面。</div>
+    ${backlog > 0 ? `<p class="review-backlog">另有 ${backlog} 条已到期，积压会越滚越大。今天可以一次清完。</p>` : ''}
     <button class="review-flip-btn" data-review-start>开始回顾${backlog > 0 ? '（按额度）' : ''}</button>
-    ${backlog > 0 ? `<button class="btn ghost sm review-all-btn" data-review-all>清积压 · 全部 ${due.length} 个</button>` : ''}
+    ${backlog > 0 ? `<button class="btn ghost sm review-all-btn" data-review-all>清积压 · 全部 ${due.length} 条</button>` : ''}
   </div>`;
 }
 
@@ -1500,15 +1561,17 @@ function renderReviewCard() {
   }
 
   const track = trackNameOf(entry.track);
-  const trackChip = (track ? `<span class="pos-tag">${esc(track)}</span>` : '')
-    + (entry.graduated && !entry.mastered ? '<span class="pos-tag review-grad-tag">毕业确认</span>' : '');
+  const metaBits = [kindTagHTML(entry)];
+  if (track) metaBits.push(`<span class="review-track">${esc(track)}</span>`);
+  if (entry.graduated && !entry.mastered) metaBits.push('<span class="pos-tag review-grad-tag">毕业确认</span>');
+  const metaHTML = metaBits.join('');
   const progress = `回顾 · ${session.idx + 1}/${session.ids.length}`;
 
   if (!session.flipped) {
     el.reviewArea.innerHTML = `<div class="review-card">
       <div class="review-progress">${progress}</div>
-      <div class="review-term">${esc(truncate(entry.word, 60))}</div>
-      <div class="review-meta">${trackChip}</div>
+      <div class="review-term">${esc(entry.word)}</div>
+      <div class="review-meta">${metaHTML}</div>
       <div class="review-hint">先想一下它的意思，再翻面。<br>按 <kbd>空格</kbd> 或点下面的按钮。</div>
       <button class="review-flip-btn" data-review-flip>显示答案</button>
     </div>`;
@@ -1519,11 +1582,11 @@ function renderReviewCard() {
   const memory = plainText(entry.memory || '');
   el.reviewArea.innerHTML = `<div class="review-card">
     <div class="review-progress">${progress}</div>
-    <div class="review-term">${esc(truncate(entry.word, 60))}</div>
-    <div class="review-meta">${trackChip}</div>
+    <div class="review-term">${esc(entry.word)}</div>
+    <div class="review-meta">${metaHTML}</div>
     <div class="review-answer">
-      <div class="review-meaning">${esc(truncate(meaning, 120))}</div>
-      ${memory ? `<div class="review-extra"><span class="lbl">// 为什么重要</span><br>${esc(truncate(memory, 90))}</div>` : ''}
+      <div class="review-meaning">${esc(truncate(meaning, 160))}</div>
+      ${memory ? `<div class="review-extra"><span class="lbl">为什么重要</span><br>${esc(truncate(memory, 120))}</div>` : ''}
       <div class="grade-row">${REVIEW_GRADES.map((g) => `
         <button class="grade-btn g${g.g}" data-review-grade="${g.g}">
           ${g.label}<small>${g.key} · ${g.hint}</small>
@@ -1570,10 +1633,9 @@ function renderReviewSummary() {
       ? `<div class="review-tip">建议：明天先把 ${forgot.slice(0, 2).map((w) => `<b>${esc(w)}</b>`).join('、')} 过一遍，再收新词。</div>`
       : '';
     el.reviewArea.innerHTML = `<div class="review-done">
-      <img src="assets/robot-happy.png" alt="">
-      <div class="review-done-title">回顾完成 · ${grades.length} 词</div>
+      <div class="review-done-title">这次回顾了 ${grades.length} 条词条</div>
       <div class="review-done-sub">想起来了 ${good} · 需要加强 ${weak + grades.filter((g) => g.grade === 1).length}<br>
-        ${weak ? '没想起的词明天会再回来。' : '明天的它还会来找你。'}</div>
+        ${weak ? '没想起的词条明天会再回来。' : '明天它还会来找你。'}</div>
       ${tip}
     </div>`;
   }
@@ -1665,7 +1727,6 @@ function startQuiz() {
     el.btnQuiz.textContent = '出题中…';
   }
   el.reviewArea.innerHTML = `<div class="review-done">
-    <img src="assets/robot-think.png" alt="">
     <div class="review-empty-title">AI 正在出题</div>
     <div class="review-empty-sub">按你到期的词生成单选题，答完自动判分并安排下一次复习。</div>
   </div>`;
@@ -1768,7 +1829,6 @@ function renderQuizSummary() {
     ? `<div class="review-tip">建议：明天先把 ${forgot.slice(0, 2).map((w) => `<b>${esc(w)}</b>`).join('、')} 过一遍。</div>`
     : '';
   el.reviewArea.innerHTML = `<div class="review-done quiz-done">
-    <img src="assets/robot-${right === answers.length ? 'happy' : 'idle'}.png" alt="">
     <div class="review-done-title">考官结果 · ${right}/${answers.length}</div>
     <div class="review-done-sub">答对的进入下一复习阶段，答错的明天回来。</div>
     ${tip}
@@ -1845,13 +1905,23 @@ function statsHTML(d) {
       <button data-range="30" class="${d.range === '30' ? 'active' : ''}" role="tab" aria-selected="${d.range === '30'}">30 天</button>
       <button data-range="month" class="${d.range === 'month' ? 'active' : ''}" role="tab" aria-selected="${d.range === 'month'}">本月</button>
     </div>
+    ${d.total === 0
+      ? `<p class="stats-anchor">还没有领域记录。收下第一个术语，它就会按方向归到这里。</p>
+         <div class="stats-anchor-action"><button class="btn ghost sm" data-suggest-action="jot">去收录术语</button></div>`
+      : `<p class="stats-anchor">${esc(rangeLabel)}在 <b>${d.tracks.length}</b> 个领域收了 <b>${d.rangeAdded}</b> 条术语</p>`}
+    <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : `复习 <b>${d.rangeReviewed}</b> 次 · ${d.streak ? `连续 <b>${d.streak}</b> 天` : '今天还没开始'}`}</p>
     <div class="stats-hero">
       <div class="stat-tile"><b>${d.total}</b><span>收录</span></div>
       <div class="stat-tile"><b>${d.stats.reviewedWords}</b><span>复习过</span></div>
       <div class="stat-tile"><b>${d.stats.stable}</b><span>稳固</span></div>
       <div class="stat-tile${d.due ? ' is-due' : ''}"><b>${d.due}</b><span>到期</span></div>
     </div>
-    <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : d.streak ? `连续学习 <b>${d.streak}</b> 天` : '今天还没开始'} · ${esc(rangeLabel)}新增 <b>${d.rangeAdded}</b> · 复习 <b>${d.rangeReviewed}</b> 次</p>
+
+    <div class="stat-block">
+      <div class="stat-block-head"><span>领域覆盖</span><b>${d.tracks.length}</b></div>
+      ${tracks}
+      ${d.noTrack ? `<p class="stats-note">另有 ${d.noTrack} 条未归方向。</p>` : ''}
+    </div>
 
     <div class="chart-card">
       <div class="chart-head"><span class="chart-title">${esc(rangeLabel)}</span>${legend}</div>
@@ -1863,13 +1933,7 @@ function statsHTML(d) {
     </div>
 
     <div class="stat-block">
-      <div class="stat-block-head"><span>方向分布</span><b>${d.tracks.length}</b></div>
-      ${tracks}
-      ${d.noTrack ? `<p class="stats-note">另有 ${d.noTrack} 条未归方向。</p>` : ''}
-    </div>
-
-    <div class="stat-block">
-      <div class="stat-block-head"><span>还不稳的词</span><b>${d.weak.length}</b></div>
+      <div class="stat-block-head"><span>还不稳的术语</span><b>${d.weak.length}</b></div>
       <ul class="weak-list">${weak}</ul>
     </div>
 
@@ -1950,7 +2014,6 @@ function renderAgentLog() {
   if (!el.agentLog) return;
   if (!state.agentLog.length && !state.agentBusy) {
     el.agentLog.innerHTML = `<div class="agent-empty">
-      <img src="assets/robot-idle.png" alt="">
       <p>说一件具体的事，比如「查一下 idempotent 并放进编程方向」。</p>
     </div>`;
     return;
@@ -2029,12 +2092,12 @@ function setParseBusy(busy) {
 async function parse(text, mode) {
   if (state.busy) return;
   if (state.followBusy) {
-    toast('等这次追问回答完再查新词', 'warn');
+    toast('等这次追问回答完再收录新术语', 'warn');
     return;
   }
   const input = String(text === undefined ? el.input.value : text).trim();
   if (!input) {
-    toast('先粘贴或输入一个词');
+    toast('先输入一个术语或链接');
     el.input.focus();
     return;
   }
@@ -2183,7 +2246,7 @@ function setZone(n) {
 
 function startNew() {
   if (state.followBusy) {
-    toast('等这次追问回答完再查新词', 'warn');
+    toast('等这次追问回答完再收录新术语', 'warn');
     return;
   }
   state.lastResult = null;
@@ -2279,12 +2342,23 @@ function setExpanded(v) {
   }
 }
 
+function closeMoreMenu() {
+  if (!el.moreMenu) return;
+  el.moreMenu.classList.add('hidden');
+  if (el.btnMore) el.btnMore.setAttribute('aria-expanded', 'false');
+}
+
 function switchTab(tab) {
   state.tab = tab;
-  $$('.nav-icon').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  closeMoreMenu();
+  $$('.head-actions [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  if (el.btnMore) el.btnMore.classList.toggle('active', tab === 'agent' || tab === 'settings');
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + tab));
   document.body.classList.toggle('result-view', tab === 'jot' && Boolean(state.lastResult) && !state.busy);
-  if (tab === 'hot') renderHot();
+  if (tab === 'hot') {
+    renderLibraryTracks();
+    renderHot();
+  }
   if (tab === 'review') renderReview();
   if (tab === 'stats') renderStatsView();
   if (tab === 'agent') renderAgent();
@@ -2408,7 +2482,7 @@ function showObsidianOnboard() {
       <button class="btn ghost" data-obs-redetect>${icon('i-repeat')}重新检测</button>
       <button class="btn primary" data-obs-later>先不用 Obsidian</button>
     </div>
-    <p class="modal-note">不用 Obsidian 也能查词；热词和追问记录都在秒记本地。</p>`;
+    <p class="modal-note">不用 Obsidian 也能收录；词条和追问记录都在本机。</p>`;
   el.modal.dataset.key = '';
   el.modal.classList.remove('hidden');
 }
@@ -2464,16 +2538,15 @@ function renderTrackList() {
     if (e.track) counts[e.track] = (counts[e.track] || 0) + 1;
   }
   if (!tracks.length) {
-    el.trackList.innerHTML = '<div class="review-empty-sub" style="padding:2px 0;">还没有方向。查词后 AI 会自动建议归属。</div>';
+    el.trackList.innerHTML = '<div class="review-empty-sub" style="padding:2px 0;">还没有方向。加一个，AI 会按它解释。</div>';
     return;
   }
   el.trackList.innerHTML = tracks.map((t) => `
     <div class="track-row">
       <div>
         <div class="t-name">${esc(t.name)}</div>
-        ${counts[t.id] ? `<div class="t-desc">${counts[t.id]} 个词条</div>` : ''}
+        ${counts[t.id] ? `<div class="t-desc">${counts[t.id]} 条词条</div>` : ''}
       </div>
-      <span class="t-count">${counts[t.id] ? counts[t.id] + ' 词' : ''}</span>
       <button class="t-del" data-track-del="${esc(t.id)}">移除</button>
     </div>`).join('');
 }
@@ -2487,6 +2560,7 @@ async function saveTracks(tracks, msg) {
   state.config = r.config;
   renderTrackList();
   renderCaptureTrack();
+  renderLibraryTracks();
   if (state.lastResult && state.lastResult.entry) renderResult();
   if (msg) toast(msg);
 }
@@ -2540,17 +2614,11 @@ function bindTracks() {
       }
     }
     if (state.captureTrack === id) state.captureTrack = '';
+    if (state.trackFilter === id) state.trackFilter = '';
     await saveTracks(tracks, failed.length
       ? `已移除方向；${failed.length} 条词条因同方向已有同名术语，未自动改回无方向`
       : '已移除方向，相关词条回到无方向');
     renderAll();
-  });
-
-  el.trackPresets.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-preset]');
-    if (!btn) return;
-    el.trackName.value = btn.dataset.preset;
-    el.btnAddTrack.click();
   });
 }
 
@@ -2855,7 +2923,7 @@ function bind() {
       state.captureMode = btn.dataset.mode;
       for (const b of el.modeSeg.querySelectorAll('button')) b.classList.toggle('active', b === btn);
       const ph = {
-        auto: '粘贴英文单词 / 句子，或一个网页链接…',
+        auto: '单词、术语、句子，或一个链接…',
         lookup: '想表达什么？输入中文，给出英文说法…',
         note: '随手记一段想法或摘录，AI 只整理不改写…'
       }[state.captureMode];
@@ -2868,6 +2936,13 @@ function bind() {
     el.captureTrack.addEventListener('change', () => {
       state.captureTrack = el.captureTrack.value || '';
       el.input.focus();
+    });
+  }
+
+  if (el.captureTrackAdd) {
+    el.captureTrackAdd.addEventListener('click', () => {
+      switchTab('settings');
+      setTimeout(() => el.trackName?.focus(), 60);
     });
   }
 
@@ -2891,25 +2966,58 @@ function bind() {
     if (e.key !== 'Escape') return;
     if (!el.modal.classList.contains('hidden')) {
       closeModal();
+    } else if (el.moreMenu && !el.moreMenu.classList.contains('hidden')) {
+      closeMoreMenu();
+      el.btnMore?.focus();
     } else if (state.expanded) {
       window.api.collapse();
     }
   });
 
-  $$('.nav-icon').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+  $$('.head-actions [data-tab]').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+  if (el.btnMore) {
+    el.btnMore.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = el.moreMenu.classList.contains('hidden');
+      el.moreMenu.classList.toggle('hidden', !open);
+      el.btnMore.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.more-wrap')) closeMoreMenu();
+  });
 
   el.hotSearch.addEventListener('input', () => {
     state.search = el.hotSearch.value;
     renderHot();
   });
 
-  el.hotSeg.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-filter]');
-    if (!btn) return;
-    state.filter = btn.dataset.filter;
-    $$('button', el.hotSeg).forEach((b) => b.classList.toggle('active', b === btn));
-    renderHot();
-  });
+  if (el.libTypeSeg) {
+    el.libTypeSeg.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-type]');
+      if (!btn) return;
+      state.typeFilter = btn.dataset.type;
+      $$('button', el.libTypeSeg).forEach((b) => b.classList.toggle('active', b === btn));
+      renderLibraryTracks();
+      renderHot();
+    });
+  }
+
+  if (el.libTrack) {
+    el.libTrack.addEventListener('change', () => {
+      state.trackFilter = el.libTrack.value || '';
+      renderHot();
+    });
+  }
+
+  if (el.libScope) {
+    el.libScope.addEventListener('change', () => {
+      state.filter = el.libScope.value || 'all';
+      renderHot();
+    });
+  }
 
   el.hotList.addEventListener('click', (e) => {
     if (e.target.closest('[data-go-jot]')) {
@@ -2919,9 +3027,11 @@ function bind() {
     }
     if (e.target.closest('[data-all-words]')) {
       state.filter = 'all';
+      state.trackFilter = '';
       state.search = '';
       el.hotSearch.value = '';
-      $$('button', el.hotSeg).forEach((b) => b.classList.toggle('active', b.dataset.filter === 'all'));
+      if (el.libScope) el.libScope.value = 'all';
+      renderLibraryTracks();
       renderHot();
       return;
     }
@@ -3506,6 +3616,7 @@ async function initData() {
     document.body.classList.toggle('expanded', state.expanded);
     renderStats();
     renderCaptureTrack();
+    renderLibraryTracks();
     renderEmpty();
     if (state.expanded) refreshClipboard(true);
     setHeadAvatar('idle');
