@@ -5,11 +5,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 const send = (channel, ...args) => ipcRenderer.send(channel, ...args);
 
-const EVENTS = ['ui:expanded', 'ui:collapsed', 'ui:nav', 'ui:toast', 'ui:focus', 'ui:dev-query', 'ui:dev-followup', 'ui:dev-zone'];
+const EVENTS = ['ui:expanded', 'ui:collapsed', 'ui:nav', 'ui:toast', 'ui:focus', 'ui:dev-query', 'ui:dev-followup', 'ui:dev-zone', 'ui:capture'];
 
 contextBridge.exposeInMainWorld('api', {
   init: () => invoke('app:init'),
-  query: (text) => invoke('ai:query', text),
+  query: (text, mode) => invoke('ai:query', text, mode),
   followUp: (key, question) => invoke('ai:followup', key, question),
   testApi: () => invoke('ai:test'),
   saveConfig: (patch) => invoke('config:save', patch),
@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   remove: (key) => invoke('entry:delete', key),
   submitReview: (key, grade) => invoke('review:submit', key, grade),
   setEntryTrack: (key, trackId) => invoke('entry:set-track', key, trackId),
+  collectTerm: (word) => invoke('term:collect', word),
+  openUrl: (url) => invoke('app:open-url', url),
 
   openNote: () => invoke('obsidian:open'),
   syncNote: () => invoke('obsidian:sync'),

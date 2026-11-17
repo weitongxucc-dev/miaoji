@@ -173,6 +173,9 @@ function entryBlock(entry, trackName) {
   const m = markers(entry.key);
   const lines = [];
   const isSentence = entry.kind === 'sentence';
+  const isClip = entry.kind === 'clip';
+  const isNote = entry.kind === 'note';
+  const isLookup = entry.kind === 'lookup';
   const rawWord = String(entry.word || '').replace(/\s+/g, ' ').trim();
   const heading = isSentence
     ? `## “${rawWord.length > 60 ? rawWord.slice(0, 59) + '…' : rawWord}”`
@@ -185,9 +188,13 @@ function entryBlock(entry, trackName) {
   const metaBits = [];
   if (isSentence) metaBits.push('💬 句子');
   if (entry.kind === 'term') metaBits.push('🧩 术语');
+  if (isClip) metaBits.push('💾 剪藏');
+  if (isNote) metaBits.push('✍️ 闪念');
+  if (isLookup) metaBits.push('🔎 反查');
+  if (isClip && entry.source && entry.source.site) metaBits.push(entry.source.site);
   if (trackName) metaBits.push(`🎯 ${trackName}`);
   if (entry.phonetic) metaBits.push(`\`${entry.phonetic}\``);
-  if (entry.kind !== 'term' && entry.pos) metaBits.push(`*${entry.pos}*`);
+  if (entry.kind !== 'term' && entry.pos && !isClip && !isNote) metaBits.push(`*${entry.pos}*`);
   metaBits.push(`🔥 **${entry.count} 次**`);
   metaBits.push(`最近 ${fmt(entry.lastAt)}`);
   metaBits.push(`首查 ${fmt(entry.firstAt, false)}`);
@@ -196,7 +203,81 @@ function entryBlock(entry, trackName) {
   lines.push(metaBits.join(' · '));
   lines.push('');
 
-  if (isSentence) {
+  if (isClip && entry.source && entry.source.url) {
+    lines.push(`> 🔗 来源：[${cell(entry.source.title || entry.source.site || entry.source.url)}](${entry.source.url})`);
+    if (entry.source.capturedAt) lines.push(`> 收藏于 ${fmt(entry.source.capturedAt, true)}`);
+    lines.push('');
+  }
+
+  if (isClip || isNote) {
+    if (entry.summary) {
+      lines.push(cell(entry.summary));
+      lines.push('');
+    }
+    if (entry.key_points && entry.key_points.length) {
+      lines.push('**关键点**');
+      lines.push('');
+      entry.key_points.forEach((p) => lines.push(`- ${cell(p)}`));
+      lines.push('');
+    }
+    if (entry.terms && entry.terms.length) {
+      lines.push('**文中术语**');
+      lines.push('');
+      entry.terms.forEach((t) => {
+        lines.push(`- **${cell(t.word)}**${t.meaning ? `：${cell(t.meaning)}` : ''}`);
+      });
+      lines.push('');
+    }
+    if (entry.note) {
+      lines.push(`- ⚠️ **备注**：${cell(entry.note)}`);
+      lines.push('');
+    }
+    if (entry.original) {
+      lines.push('> [!quote]- 原文');
+      for (const p of String(entry.original).split(/\n{2,}/)) {
+        const clean = p.trim();
+        if (!clean) continue;
+        for (const ln of clean.split('\n')) lines.push(`> ${cell(ln)}`);
+        lines.push('>');
+      }
+      if (lines[lines.length - 1] === '>') lines.pop();
+      lines.push('');
+    }
+  } else if (isLookup) {
+    if (entry.lookup_zh) {
+      lines.push(`> 想表达：**${cell(entry.lookup_zh)}**`);
+      lines.push('');
+    }
+    if (entry.meaning_zh) {
+      lines.push(`**${cell(entry.meaning_zh)}**`);
+      lines.push('');
+    }
+    if (entry.definition_en) {
+      lines.push(`*${cell(entry.definition_en)}*`);
+      lines.push('');
+    }
+    if (entry.alternatives && entry.alternatives.length) {
+      lines.push('**备选表达**');
+      lines.push('');
+      entry.alternatives.forEach((a) => {
+        lines.push(`- **${cell(a.en)}**${a.nuance ? `：${cell(a.nuance)}` : ''}`);
+      });
+      lines.push('');
+    }
+    if (entry.examples && entry.examples.length) {
+      entry.examples.forEach((ex) => {
+        lines.push(`- 📝 ${cell(ex.en)}`);
+        if (ex.zh) lines.push(`  - ${cell(ex.zh)}`);
+      });
+      lines.push('');
+    }
+    if (entry.collocations && entry.collocations.length) {
+      lines.push(`- 🧩 **搭配**：${entry.collocations.map(cell).join(' · ')}`);
+    }
+    if (entry.memory) lines.push(`- 🧠 **记忆**：${cell(entry.memory)}`);
+    if (entry.note) lines.push(`- ⚠️ **备注**：${cell(entry.note)}`);
+    lines.push('');
+  } else if (isSentence) {
     lines.push(`> ${cell(entry.sentence_translation)}`);
     lines.push('');
     if (entry.key_points && entry.key_points.length) {

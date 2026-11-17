@@ -1,5 +1,5 @@
 /* ============================================================
-   秒记 v1.4.1 · 纸面终端皮肤
+   秒记 v1.5.0 · 纸面终端皮肤
    暖米白纸面 / 等宽字 / 橙色提示 / 像素小机器人
    加载在 styles.css 之后，只覆盖视觉，不改布局结构。
    ============================================================ */
@@ -1325,3 +1325,24 @@ button:focus-visible, [tabindex]:focus-visible {
   outline-offset: -2px;
 }
 .zone:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ---------- 捕获模式（查词 / 中→英 / 闪念） ---------- */
+
+.mode-seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 0;
+}
+.mode-seg button { padding: 3px 7px; font-size: 10px; letter-spacing: 0; white-space: nowrap; }
+.composer-bar .clip-chip { flex: 0 1 auto; }
+
+/* ---------- 拖动时隐藏气泡；长按俏皮话 ---------- */
+
+body.dragging .bubble { opacity: 0; }
+.bubble { transition: opacity 120ms ease; }
+.bubble.quip {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+.bubble.quip::before { content: "> "; color: var(--accent); }

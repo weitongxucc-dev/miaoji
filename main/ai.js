@@ -92,6 +92,62 @@ const SYSTEM_PROMPT = `你是一位严谨的中英双语词典编辑，同时也
 6. 术语（kind 为 term）的解释要贴合用户声明或最贴近的学习方向。
 7. 只输出 JSON。所有中文内容使用简体中文。`;
 
+const NOTE_PROMPT = `你是「秒记」的整理助手。用户会给你一段随手记下的想法或摘录（可能很口语、没有结构）。
+请只做轻整理，**绝对不要改写用户的观点或语气**，也不要补充用户没说的内容。
+输出一个 JSON 对象：
+{
+  "kind": "note",
+  "word": "不超过 20 字的标题，概括这段笔记在讲什么",
+  "summary": "2 句以内，忠实复述这段话的核心；保留用户的关键说法",
+  "key_points": ["从原文里提炼的要点，可加少量结构化，最多 5 条"],
+  "terms": [
+    { "word": "原文里值得学习的英文词/术语（如果原文是中文，给对应的英文说法）", "meaning": "在这段话里它指什么" }
+  ],
+  "note": "如果发现逻辑跳跃或未展开的地方，用一句话指出，没有就给空字符串",
+  "followups": ["围绕这段笔记的短问题，最多 3 条，每条不超过 24 字"],
+  "track": "最贴近的学习方向名称；用户没有设定方向或都不贴近就给空字符串"
+}
+要求：只输出 JSON；中文用简体；terms 最多 8 个，没有就给空数组。`;
+
+const LOOKUP_PROMPT = `你是「秒记」的中英表达助手。用户想表达一个中文概念，但不确定英文怎么说。
+用户会给你中文内容（可能是一个词、一句想说的话、一个概念）。请给出最自然、最贴切的英文表达。
+输出一个 JSON 对象：
+{
+  "kind": "lookup",
+  "word": "最推荐的英文表达（单词或短语）",
+  "phonetic": "IPA 音标，带斜杠；短语可为空",
+  "pos": "词性缩写",
+  "meaning_zh": "这个英文表达准确的中文含义，以及它和中文原意的贴合点",
+  "definition_en": "A concise English definition",
+  "alternatives": [
+    { "en": "另一个候选表达", "nuance": "和首选表达的差别：语体、正式程度、使用场合" }
+  ],
+  "examples": [
+    { "en": "英文例句", "zh": "中文翻译" }
+  ],
+  "collocations": ["常见搭配，最多 4 个"],
+  "memory": "一句话说清楚怎么记住或怎么区分这几个候选",
+  "note": "容易用错的地方；没有就给空字符串",
+  "followups": ["围绕用法的短问题，最多 3 条"],
+  "track": "最贴近的学习方向名称；没有给空字符串"
+}
+要求：alternatives 给 1 到 3 个，必须说明差别；examples 给 2 条；只输出 JSON；中文用简体。`;
+
+const CLIP_PROMPT = `你是「秒记」的阅读助手。用户会给你一个网页的标题、网址和正文。请只根据正文内容输出一个 JSON 对象：
+{
+  "kind": "clip",
+  "word": "文章标题（沿用原标题，不要改写）",
+  "summary": "3 到 5 句中文摘要：这篇文章在讲什么、核心观点是什么",
+  "key_points": ["3 到 5 条关键信息，每条一句中文"],
+  "terms": [
+    { "word": "文中出现的值得学习的英文词/术语（原文是中文就给对应英文）", "meaning": "它在这篇文章里的意思" }
+  ],
+  "note": "文章最重要的一个判断或提醒，一句中文；没有就给空字符串",
+  "followups": ["围绕文章的短问题，最多 3 条，每条不超过 24 字"],
+  "track": "最贴近的学习方向名称；没有给空字符串"
+}
+要求：terms 最多 12 个，优先选对理解全文关键的术语，不要选常见词；不要编造正文里没有的内容；只输出 JSON；中文用简体。`;
+
 const FOLLOWUP_PROMPT = `你是「秒记」的英语词典助教。用户正在追问一个已经记录过的词条或句子。
 你会收到词条上下文和之前的追问记录。请基于这些内容回答当前问题。
 要求：
@@ -276,6 +332,107 @@ function normalizeEntry(raw, inputText) {
   return entry;
 }
 
+/* ---------------- 剪藏 / 闪念 / 中文反查 ---------------- */
+
+function normalizeTerms(raw) {
+  return cleanArr(raw)
+    .map((t) => {
+      if (typeof t === 'string') return { word: t.trim(), meaning: '' };
+      if (t && typeof t === 'object') return { word: cleanStr(t.word || t.term), meaning: cleanStr(t.meaning) };
+      return null;
+    })
+    .filter((t) => t && t.word)
+    .slice(0, 12);
+}
+
+function normalizeClip(raw, page) {
+  if (!raw || typeof raw !== 'object') throw new Error('AI 返回的内容格式不正确，请重试');
+  return {
+    kind: 'clip',
+    word: cleanStr(raw.word) || page.title || page.site,
+    summary: cleanStr(raw.summary),
+    key_points: strList(raw.key_points, 6),
+    terms: normalizeTerms(raw.terms),
+    note: cleanStr(raw.note),
+    followups: strList(raw.followups, 4),
+    track: cleanStr(raw.track),
+    source: {
+      type: 'url',
+      url: page.url,
+      title: page.title,
+      site: page.site,
+      capturedAt: new Date().toISOString()
+    },
+    original: page.text,
+    phonetic: '',
+    pos: '',
+    meaning_zh: '',
+    examples: [],
+    synonyms: [],
+    collocations: [],
+    memory: '',
+    origin: normalizeOrigin(null)
+  };
+}
+
+function normalizeNote(raw, text) {
+  if (!raw || typeof raw !== 'object') throw new Error('AI 返回的内容格式不正确，请重试');
+  return {
+    kind: 'note',
+    word: cleanStr(raw.word) || String(text || '').trim().slice(0, 20),
+    summary: cleanStr(raw.summary),
+    key_points: strList(raw.key_points, 6),
+    terms: normalizeTerms(raw.terms),
+    note: cleanStr(raw.note),
+    followups: strList(raw.followups, 4),
+    track: cleanStr(raw.track),
+    source: { type: 'manual', url: '', title: '', site: '', capturedAt: new Date().toISOString() },
+    original: String(text || '').trim(),
+    phonetic: '',
+    pos: '',
+    meaning_zh: '',
+    examples: [],
+    synonyms: [],
+    collocations: [],
+    memory: '',
+    origin: normalizeOrigin(null)
+  };
+}
+
+function normalizeLookup(raw, text) {
+  if (!raw || typeof raw !== 'object') throw new Error('AI 返回的内容格式不正确，请重试');
+  const alternatives = cleanArr(raw.alternatives)
+    .map((a) => {
+      if (typeof a === 'string') return { en: a.trim(), nuance: '' };
+      if (a && typeof a === 'object') return { en: cleanStr(a.en), nuance: cleanStr(a.nuance) };
+      return null;
+    })
+    .filter((a) => a && a.en)
+    .slice(0, 4);
+  const entry = normalizeEntry(
+    {
+      kind: 'word',
+      word: cleanStr(raw.word) || String(text || '').trim(),
+      phonetic: raw.phonetic,
+      pos: raw.pos,
+      meaning_zh: raw.meaning_zh,
+      definition_en: raw.definition_en,
+      examples: raw.examples,
+      synonyms: Array.isArray(raw.alternatives) ? [] : raw.synonyms,
+      collocations: raw.collocations,
+      memory: raw.memory,
+      note: raw.note,
+      followups: raw.followups,
+      track: raw.track
+    },
+    text
+  );
+  entry.kind = 'lookup';
+  entry.alternatives = alternatives;
+  entry.lookup_zh = String(text || '').trim();
+  return entry;
+}
+
 /**
  * 把用户的学习方向注入提示词：AI 按「track」字段建议归属，并贴合领域语境解释。
  */
@@ -307,10 +464,78 @@ async function askDeepSeek(text, config) {
   return normalizeEntry(extractJson(content), text);
 }
 
+/** 抓到的网页正文 → 摘要 + 关键点 + 术语标注 */
+async function summarizeClip(page, config) {
+  const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
+  if (process.env.MIAOJI_MOCK === '1') {
+    await new Promise((r) => setTimeout(r, 600));
+    return mockClip(page);
+  }
+  const material = [
+    `标题：${page.title}`,
+    `站点：${page.site}`,
+    page.publishedAt ? `发布时间：${page.publishedAt}` : '',
+    '正文：',
+    String(page.text || '').slice(0, 8000)
+  ].filter(Boolean).join('\n');
+  const content = await callChat(
+    [
+      { role: 'system', content: CLIP_PROMPT + withTrackContext(trackNames) },
+      { role: 'user', content: material }
+    ],
+    config,
+    { maxTokens: 2000, temperature: 0.2, json: true }
+  );
+  return normalizeClip(extractJson(content), page);
+}
+
+/** 随手记的文字 → 轻整理（不改写原意） */
+async function cleanNote(text, config) {
+  const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
+  if (process.env.MIAOJI_MOCK === '1') {
+    await new Promise((r) => setTimeout(r, 500));
+    return mockNote(text);
+  }
+  const content = await callChat(
+    [
+      { role: 'system', content: NOTE_PROMPT + withTrackContext(trackNames) },
+      { role: 'user', content: String(text || '').slice(0, 6000) }
+    ],
+    config,
+    { maxTokens: 1500, temperature: 0.3, json: true }
+  );
+  return normalizeNote(extractJson(content), text);
+}
+
+/** 中文 → 英文表达 */
+async function lookupZh(text, config) {
+  const trackNames = Array.isArray(config.tracks) ? config.tracks.map((t) => t.name) : [];
+  if (process.env.MIAOJI_MOCK === '1') {
+    await new Promise((r) => setTimeout(r, 500));
+    return mockLookup(text);
+  }
+  const content = await callChat(
+    [
+      { role: 'system', content: LOOKUP_PROMPT + withTrackContext(trackNames) },
+      { role: 'user', content: String(text || '').trim() }
+    ],
+    config,
+    { maxTokens: 1600, temperature: 0.3, json: true }
+  );
+  return normalizeLookup(extractJson(content), text);
+}
+
 function entryContext(entry) {
   const bits = [];
-  bits.push(entry.kind === 'sentence' ? '句子' : '单词 / 短语');
+  const kindLabel = { sentence: '句子', term: '术语', note: '闪念笔记', clip: '剪藏文章', lookup: '中文反查' }[entry.kind] || '单词 / 短语';
+  bits.push(kindLabel);
   bits.push(`词条：${entry.word}`);
+  if (entry.lookup_zh) bits.push(`用户想表达的中文：${entry.lookup_zh}`);
+  if (entry.summary) bits.push(`摘要：${entry.summary}`);
+  if (entry.original) bits.push(`原文摘录：${String(entry.original).slice(0, 1200)}`);
+  if (entry.terms && entry.terms.length) {
+    bits.push(`文中术语：${entry.terms.map((t) => `${t.word}（${t.meaning}）`).join('；')}`);
+  }
   if (entry.phonetic) bits.push(`音标：${entry.phonetic}`);
   if (entry.pos) bits.push(`词性：${entry.pos}`);
   if (entry.meaning_zh) bits.push(`中文释义：${entry.meaning_zh}`);
@@ -508,9 +733,105 @@ function mockFollowUp(entry, question) {
   return base;
 }
 
+function mockClip(page) {
+  return {
+    kind: 'clip',
+    word: page.title || '测试文章',
+    summary: '（测试摘要）这篇文章讨论了重试机制里最常见的坑：网络超时导致重复扣款。作者认为接口设计必须默认「请求可能到达两次」，并用幂等键保证副作用只发生一次。文章最后给了一份上线前的检查清单。',
+    key_points: [
+      '超时重试会让同一个请求到达服务端多次',
+      '幂等键（idempotency key）要让客户端生成，而不是服务端补',
+      '上线前检查：支付、下单、消息投递三类接口是否都做了幂等'
+    ],
+    terms: [
+      { word: 'idempotency', meaning: '幂等性：同一操作执行多次，结果与一次相同' },
+      { word: 'retry storm', meaning: '重试风暴：大量客户端同时重试把服务压垮' },
+      { word: 'at-least-once delivery', meaning: '至少投递一次：消息可能重复，消费方要能去重' }
+    ],
+    note: '（测试数据）最大的风险不是重试本身，而是把「不重复」寄托在客户端不重试上。',
+    followups: ['幂等键应该由谁生成？', '重试风暴怎么限流？', '至少一次和恰好一次怎么选？'],
+    track: '',
+    source: {
+      type: 'url',
+      url: page.url,
+      title: page.title,
+      site: page.site,
+      capturedAt: new Date().toISOString()
+    },
+    original: page.text,
+    phonetic: '',
+    pos: '',
+    meaning_zh: '',
+    examples: [],
+    synonyms: [],
+    collocations: [],
+    memory: '',
+    origin: normalizeOrigin(null)
+  };
+}
+
+function mockNote(text) {
+  const t = String(text || '').trim();
+  return {
+    kind: 'note',
+    word: t.slice(0, 20) || '随手记',
+    summary: `（测试整理）这段话的核心是「${t.slice(0, 30)}……」这里只做结构整理，观点保持原样。`,
+    key_points: ['保留原来的判断和语气', '把长句拆成短句，方便以后回看'],
+    terms: [{ word: 'idempotency key', meaning: '幂等键，用来让重复请求只生效一次' }],
+    note: '（测试数据）第二段的结论没有给依据，之后可以补上例子。',
+    followups: ['这个判断有反例吗？', '相关术语还有哪些？'],
+    track: '',
+    source: { type: 'manual', url: '', title: '', site: '', capturedAt: new Date().toISOString() },
+    original: t,
+    phonetic: '',
+    pos: '',
+    meaning_zh: '',
+    examples: [],
+    synonyms: [],
+    collocations: [],
+    memory: '',
+    origin: normalizeOrigin(null)
+  };
+}
+
+function mockLookup(text) {
+  return {
+    kind: 'lookup',
+    word: 'idempotent',
+    phonetic: '/ˌaɪdəmˈpoʊtənt/',
+    pos: 'adj.',
+    meaning_zh: `（测试反查）表达「${text}」最贴切的是 idempotent：强调多次执行结果相同，而不是「重复执行」。`,
+    definition_en: 'Producing the same result when applied more than once.',
+    alternatives: [
+      { en: 'repeatable', nuance: '更口语，强调「可以重复做」，不涉及副作用是否相同' },
+      { en: 'non-duplicating', nuance: '强调不产生重复数据，范围比幂等窄' }
+    ],
+    examples: [
+      { en: 'The endpoint is idempotent, so retries are safe.', zh: '这个接口是幂等的，所以重试是安全的。' },
+      { en: 'Make the operation idempotent before adding retries.', zh: '在加重试之前，先让这个操作具备幂等性。' }
+    ],
+    collocations: ['idempotent request', 'idempotent operation'],
+    memory: '词根 idem（相同）+ potent（有力）——同样使一次劲，效果一样。',
+    note: '中文常说「幂等」，英文口语里也常用 "safe to retry"。',
+    followups: ['幂等和可重复有什么区别？', '哪些 HTTP 方法是幂等的？'],
+    track: '',
+    lookup_zh: String(text || '').trim(),
+    source: { type: 'manual', url: '', title: '', site: '', capturedAt: new Date().toISOString() },
+    original: '',
+    terms: [],
+    summary: '',
+    key_points: [],
+    synonyms: [],
+    origin: normalizeOrigin(null)
+  };
+}
+
 module.exports = {
   askDeepSeek,
   askFollowUp,
+  summarizeClip,
+  cleanNote,
+  lookupZh,
   normalizeEntry,
   normalizeFollowUp,
   testConnection

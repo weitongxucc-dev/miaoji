@@ -18,6 +18,7 @@ const el = {
   composerWrap: $('#composerWrap'),
   input: $('#input'),
   btnParse: $('#btnParse'),
+  modeSeg: $('#modeSeg'),
   clipChip: $('#clipChip'),
   result: $('#result'),
   hotSearch: $('#hotSearch'),
@@ -84,7 +85,8 @@ const state = {
   onboardPending: false,
   onboardShown: false,
   reviewSession: null,
-  reviewGrades: []
+  reviewGrades: [],
+  captureMode: 'auto'
 };
 
 /* ---------------- 工具 ---------------- */
@@ -227,7 +229,10 @@ const robot = {
   avatarIdleTimer: 0,
   avatarLastClip: '',
   avatarWildTimer: 0,
-  avatarWilding: false
+  avatarWilding: false,
+  petWildTimer: 0,
+  petWilding: false,
+  quipTimer: 0
 };
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -237,18 +242,32 @@ const robotSrc = (mode, compact) => `assets/robot-${mode}${compact ? '-compact' 
 const PET_CLIPS = [
   'blink', 'blink', 'blink', 'wink',
   'look-left', 'look-left', 'look-right', 'look-right',
-  'look-up', 'look-down',
+  'look-up', 'look-down', 'squint', 'smirk',
   'tilt-left', 'tilt-right', 'squash', 'hop'
 ];
 const PET_CLIPS_REDUCED = ['blink'];
 const EMPTY_CLIPS = [
   'blink', 'blink', 'blink', 'wink',
   'look-left', 'look-right', 'look-up', 'look-down',
+  'squint', 'smirk',
   'tilt-left', 'tilt-right', 'squash', 'hop'
 ];
 const EMPTY_CLIPS_REDUCED = ['blink'];
-const AVATAR_CLIPS = ['blink', 'blink', 'blink', 'wink', 'look-left', 'look-right', 'look-up', 'look-down'];
+const AVATAR_CLIPS = ['blink', 'blink', 'blink', 'wink', 'look-left', 'look-right', 'look-up', 'look-down', 'squint'];
 const AVATAR_CLIPS_REDUCED = ['blink'];
+
+// 长按机器人时快速轮换的表情：眼睛左右晃、眯眼、坏笑、惊讶
+const PET_WILD_FRAMES = ['look-left', 'look-right', 'squint', 'wink', 'look-up', 'smirk', 'look-down', 'surprised'];
+const PET_QUIPS = [
+  '别戳我，痒',
+  '我在记单词',
+  '轻点…',
+  '再按就记住了',
+  '今天复习了吗',
+  '查个词？',
+  '手别抖',
+  '再戳就收费'
+];
 
 function pickClip(pool, last) {
   const options = pool.filter((x) => x !== last);
@@ -285,6 +304,11 @@ function schedulePetSleep() {
 }
 
 function setPetMode(mode, hold = 0) {
+  if (robot.petWilding) {
+    robot.petWilding = false;
+    clearInterval(robot.petWildTimer);
+    robot.petWildTimer = 0;
+  }
   clearTimeout(robot.petHoldTimer);
   clearTimeout(robot.petClipTimer);
   clearTimeout(robot.petIdleTimer);
@@ -617,6 +641,49 @@ function stopAvatarWild() {
   setHeadAvatar(state.busy || state.followBusy ? 'think' : 'idle');
 }
 
+/* ---------------- 长按机器人：发疯 + 俏皮话 ---------------- */
+
+function showQuip(text, ms = 2000) {
+  clearTimeout(robot.quipTimer);
+  el.petCount.textContent = text;
+  el.bubble.classList.add('quip');
+  robot.quipTimer = setTimeout(() => {
+    el.bubble.classList.remove('quip');
+    renderStats();
+  }, ms);
+}
+
+function startPetWild() {
+  if (robot.petWilding || reducedMotion.matches) return;
+  clearTimeout(robot.petIdleTimer);
+  clearTimeout(robot.petClipTimer);
+  robot.petIdleTimer = 0;
+  robot.petClipTimer = 0;
+  robot.petWilding = true;
+  el.petBody.classList.remove('is-squash', 'is-hop', 'is-shake', 'is-tilt-left', 'is-tilt-right');
+
+  let i = 0;
+  const frame = () => {
+    const clip = PET_WILD_FRAMES[i % PET_WILD_FRAMES.length];
+    el.petImg.src = robotSrc(clip, false);
+    el.petBody.classList.toggle('is-tilt-left', clip === 'look-left');
+    el.petBody.classList.toggle('is-tilt-right', clip === 'look-right');
+    i += 1;
+  };
+  frame();
+  robot.petWildTimer = setInterval(frame, 100);
+}
+
+function stopPetWild() {
+  if (!robot.petWilding) return;
+  robot.petWilding = false;
+  clearInterval(robot.petWildTimer);
+  robot.petWildTimer = 0;
+  el.petBody.classList.remove('is-tilt-left', 'is-tilt-right');
+  el.petImg.src = robotSrc('idle', false);
+  if (canPetIdle()) schedulePetIdle(rand(1200, 2400));
+}
+
 function setHeadAvatar(mode, hold = 0) {
   clearAvatarWild();
   clearTimeout(robot.avatarHoldTimer);
@@ -714,7 +781,7 @@ function renderStats() {
 /* ---------------- 词条渲染 ---------------- */
 
 function entryGist(e) {
-  return plainText(e.meaning_zh || e.sentence_translation || '');
+  return plainText(e.meaning_zh || e.sentence_translation || e.summary || '');
 }
 
 function countPill(e) {
@@ -724,6 +791,14 @@ function countPill(e) {
 
 function tags(list) {
   return (list || []).map((x) => `<span class="tag">${esc(x)}</span>`).join('');
+}
+
+/** 原文按段落输出，保留换行；内容一律转义 */
+function originalHTML(text) {
+  return String(text || '')
+    .split(/\n{2,}/)
+    .map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
 }
 
 function basicsZone(e) {
@@ -744,6 +819,9 @@ function basicsZone(e) {
       body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
     }
   } else {
+    if (e.kind === 'lookup' && e.lookup_zh) {
+      body += `<div class="lookup-src"><span class="lookup-lbl">你想表达</span><b>${esc(e.lookup_zh)}</b></div>`;
+    }
     if (e.meaning_zh) body += meaningHTML(e.meaning_zh);
     if (e.definition_en) body += `<p class="def-en">${richInline(e.definition_en)}</p>`;
 
@@ -931,8 +1009,15 @@ function followHTML(e) {
 
 function dossierHTML(e) {
   const isSentence = e.kind === 'sentence';
+  const isClip = e.kind === 'clip';
+  const isNote = e.kind === 'note';
+  const isLookup = e.kind === 'lookup';
+  const isLongHead = isSentence || isClip || isNote;
+  const kindTag = { clip: '剪藏', note: '闪念', lookup: '反查' }[e.kind] || '';
   const tracks = state.config?.tracks || [];
   const meta = [];
+  if (kindTag) meta.push(`<span class="pos-tag">${kindTag}</span>`);
+  if (e.source && e.source.site && isClip) meta.push(`<span class="src-tag">${esc(e.source.site)}</span>`);
   if (e.phonetic) meta.push(`<span class="phon">${esc(e.phonetic)}</span>`);
   if (e.pos) meta.push(`<span class="pos-tag">${esc(e.pos)}</span>`);
   if (e.mastered) meta.push('<span class="pos-tag">已掌握</span>');
@@ -942,20 +1027,31 @@ function dossierHTML(e) {
       .join('');
     meta.push(`<select class="track-select" data-track-select title="学习方向：AI 会按它解释这个词">${options}</select>`);
   }
-  meta.push(`<button class="speak-btn" data-speak="${esc(e.word)}" title="朗读">${icon('i-speaker')}</button>`);
+  if (!isClip && !isNote) {
+    meta.push(`<button class="speak-btn" data-speak="${esc(e.word)}" title="朗读">${icon('i-speaker')}</button>`);
+  }
 
-  const zones = [
-    { id: 0, label: '释义' },
-    { id: 1, label: '脉络' },
-    { id: 2, label: '追问' }
-  ];
+  const zones = isClip
+    ? [{ id: 0, label: '摘要' }, { id: 1, label: '原文' }, { id: 2, label: '追问' }]
+    : isNote
+      ? [{ id: 0, label: '整理' }, { id: 1, label: '原文' }, { id: 2, label: '追问' }]
+      : isLookup
+        ? [{ id: 0, label: '释义' }, { id: 1, label: '辨析' }, { id: 2, label: '追问' }]
+        : [{ id: 0, label: '释义' }, { id: 1, label: '脉络' }, { id: 2, label: '追问' }];
   const hasThread = Array.isArray(e.thread) && e.thread.length > 0;
+  const zoneStack = isClip
+    ? clipBasicsZone(e) + clipOriginalZone(e) + followHTML(e)
+    : isNote
+      ? noteBasicsZone(e) + noteOriginalZone(e) + followHTML(e)
+      : isLookup
+        ? basicsZone(e) + lookupAltZone(e) + followHTML(e)
+        : basicsZone(e) + originZone(e) + followHTML(e);
 
   return `<div class="dossier">
     <header class="dossier-head">
       <div class="dossier-top">
         <div class="word-wrap">
-          <h2 class="headword${isSentence ? ' is-sentence' : ''}"${isSentence ? ` title="${esc(e.word)}"` : ''}>${isSentence ? '<span class="sentence-flag">句</span>' + esc(e.word) : esc(e.word)}</h2>
+          <h2 class="headword${isLongHead ? (isSentence ? ' is-sentence' : ' is-title') : ''}"${isLongHead ? ` title="${esc(e.word)}"` : ''}>${isSentence ? '<span class="sentence-flag">句</span>' + esc(e.word) : esc(e.word)}</h2>
         </div>
         <div class="dossier-tools">
           <button class="more-btn" data-new title="查新词" aria-label="查新词">${icon('i-plus')}</button>
@@ -974,11 +1070,80 @@ function dossierHTML(e) {
         </button>`).join('')}
     </nav>
     <div class="zone-stack">
-      ${basicsZone(e)}
-      ${originZone(e)}
-      ${followHTML(e)}
+      ${zoneStack}
     </div>
   </div>`;
+}
+
+/* ---------------- 剪藏 / 闪念 / 反查 的分区 ---------------- */
+
+function termsHTML(terms) {
+  if (!terms || !terms.length) return '';
+  return `<div class="sec-label"><span>文中术语</span><b>${pad2(terms.length)}</b></div>
+    <ul class="term-list">${terms.map((t) => `
+      <li class="term-row">
+        <button class="term-word" data-collect-term="${esc(t.word)}" title="查这个术语，收进复习">${esc(t.word)}</button>
+        ${t.meaning ? `<span class="term-mean">${esc(t.meaning)}</span>` : ''}
+      </li>`).join('')}</ul>`;
+}
+
+function clipBasicsZone(e) {
+  let body = '';
+  if (e.summary) body += `<div class="rich-text clip-summary">${richBlock(e.summary)}</div>`;
+  if (e.key_points && e.key_points.length) {
+    body += `<div class="sec-label"><span>关键点</span><b>${pad2(e.key_points.length)}</b></div>
+      <ul class="point-list">${e.key_points.map((p) => `<li>${richInline(p)}</li>`).join('')}</ul>`;
+  }
+  body += termsHTML(e.terms);
+  if (e.note) body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
+  if (e.source && e.source.url) {
+    body += `<button class="link-btn sm clip-link" data-open-url="${esc(e.source.url)}">${icon('i-open')}打开原网页</button>`;
+  }
+  return `<section class="zone${state.zone === 0 ? ' active' : ''}" data-zone="0"><div class="zone-inner">${body}</div></section>`;
+}
+
+function clipOriginalZone(e) {
+  if (!e.original) {
+    return `<section class="zone${state.zone === 1 ? ' active' : ''}" data-zone="1"><div class="zone-inner">
+      <div class="missing-origin"><p>这条记录没有保存原文。</p></div></div></section>`;
+  }
+  return `<section class="zone${state.zone === 1 ? ' active' : ''}" data-zone="1"><div class="zone-inner">
+    <div class="sec-label"><span>原文</span><b>${pad2(e.original.length)}</b></div>
+    <div class="original-text">${originalHTML(e.original)}</div>
+  </div></section>`;
+}
+
+function noteBasicsZone(e) {
+  let body = '';
+  if (e.summary) body += `<div class="rich-text note-summary">${richBlock(e.summary)}</div>`;
+  if (e.key_points && e.key_points.length) {
+    body += `<div class="sec-label"><span>要点</span><b>${pad2(e.key_points.length)}</b></div>
+      <ul class="point-list">${e.key_points.map((p) => `<li>${richInline(p)}</li>`).join('')}</ul>`;
+  }
+  body += termsHTML(e.terms);
+  if (e.note) body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
+  return `<section class="zone${state.zone === 0 ? ' active' : ''}" data-zone="0"><div class="zone-inner">${body}</div></section>`;
+}
+
+function noteOriginalZone(e) {
+  return `<section class="zone${state.zone === 1 ? ' active' : ''}" data-zone="1"><div class="zone-inner">
+    <div class="sec-label"><span>你写下的原文</span></div>
+    <div class="original-text">${originalHTML(e.original || '')}</div>
+  </div></section>`;
+}
+
+function lookupAltZone(e) {
+  const alts = e.alternatives || [];
+  let body = '';
+  if (alts.length) {
+    body += `<div class="sec-label"><span>备选表达</span><b>${pad2(alts.length)}</b></div>
+      <ul class="alt-list">${alts.map((a) => `
+        <li><b>${esc(a.en)}</b>${a.nuance ? `<span>${esc(a.nuance)}</span>` : ''}</li>`).join('')}</ul>`;
+  }
+  if (e.memory) body += `<div class="memory">${icon('i-bulb', 'sm')}<span>${richInline(e.memory)}</span></div>`;
+  if (e.note) body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
+  if (!body) body = `<div class="missing-origin"><p>这条反查没有备选表达。</p></div>`;
+  return `<section class="zone${state.zone === 1 ? ' active' : ''}" data-zone="1"><div class="zone-inner">${body}</div></section>`;
 }
 
 /* ---------------- 空 / 加载 / 错误 ---------------- */
@@ -999,7 +1164,7 @@ function renderEmpty() {
     <h3>${needKey ? '先填一个 API Key' : '把词丢进来'}</h3>
     <p>${needKey
       ? '秒记用 DeepSeek 解析词义、词源和技术脉络，Key 只存在你这台电脑上。'
-      : '单词、短语、句子都行。释义、例句、词源脉络一次给出，并自动写进 Obsidian。'}</p>
+      : '单词、句子、网页链接、一段随手记都行。理解、整理和复习，一次做完，并自动写进 Obsidian。'}</p>
     ${needKey
       ? `<div class="recent-row"><button class="recent-chip warn" data-settings>去设置 API Key</button></div>`
       : ''}
@@ -1111,7 +1276,8 @@ function renderHot() {
   const q = state.search.trim().toLowerCase();
   let list = Object.values(state.entries).filter((e) => {
     if (!q) return true;
-    const hay = [e.word, e.meaning_zh, e.sentence_translation, e.memory, e.note].join(' ').toLowerCase();
+    const hay = [e.word, e.meaning_zh, e.sentence_translation, e.summary, e.memory, e.note,
+      (e.terms || []).map((t) => t.word + ' ' + t.meaning).join(' ')].join(' ').toLowerCase();
     return hay.includes(q);
   });
 
@@ -1253,7 +1419,7 @@ function renderReviewCard() {
     return;
   }
 
-  const meaning = plainText(entry.meaning_zh || entry.sentence_translation || '');
+  const meaning = plainText(entry.meaning_zh || entry.sentence_translation || entry.summary || '');
   const memory = plainText(entry.memory || '');
   el.reviewArea.innerHTML = `<div class="review-card">
     <div class="review-progress">${progress}</div>
@@ -1358,7 +1524,7 @@ function setParseBusy(busy) {
   if (label) label.textContent = busy ? '解析中' : '解析';
 }
 
-async function parse(text) {
+async function parse(text, mode) {
   if (state.busy) return;
   if (state.followBusy) {
     toast('等这次追问回答完再查新词', 'warn');
@@ -1380,7 +1546,7 @@ async function parse(text) {
   renderLoading(input);
 
   try {
-    const res = await window.api.query(input);
+    const res = await window.api.query(input, mode || state.captureMode || 'auto');
     if (!res.ok) {
       renderError(res.error);
       toast(res.error, 'warn');
@@ -1884,6 +2050,8 @@ function bindPetDrag() {
   let moved = false;
   let frame = 0;
   let pending = null;
+  let holdTimer = 0;
+  let wilding = false;
 
   function flush() {
     frame = 0;
@@ -1918,10 +2086,23 @@ function bindPetDrag() {
     wakePet();
     dragging = { sx: e.screenX, sy: e.screenY };
     moved = false;
+    wilding = false;
     window.api.dragStart(e.screenX, e.screenY);
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      holdTimer = 0;
+      if (!dragging || moved) return;
+      // 长按：原地发疯 + 说一句俏皮话，不拖动
+      wilding = true;
+      dragging = null;
+      window.api.dragEnd();
+      startPetWild();
+      showQuip(PET_QUIPS[Math.floor(Math.random() * PET_QUIPS.length)], 2200);
+    }, 480);
   });
 
   window.addEventListener('mousemove', (e) => {
+    if (wilding) return;
     if (!dragging) return;
     if (e.buttons === 0) {
       endDrag(false);
@@ -1931,6 +2112,8 @@ function bindPetDrag() {
     const dy = e.screenY - dragging.sy;
     if (!moved && Math.abs(dx) + Math.abs(dy) > 4) {
       moved = true;
+      clearTimeout(holdTimer);
+      holdTimer = 0;
       document.body.classList.add('dragging');
     }
     if (!moved) return;
@@ -1938,8 +2121,26 @@ function bindPetDrag() {
     if (!frame) frame = requestAnimationFrame(flush);
   });
 
-  window.addEventListener('mouseup', () => endDrag(true));
-  window.addEventListener('blur', () => endDrag(false));
+  window.addEventListener('mouseup', () => {
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+    if (wilding) {
+      wilding = false;
+      stopPetWild();
+      return;
+    }
+    endDrag(true);
+  });
+  window.addEventListener('blur', () => {
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+    if (wilding) {
+      wilding = false;
+      stopPetWild();
+      return;
+    }
+    endDrag(false);
+  });
 
   el.pet.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -2041,6 +2242,22 @@ function bind() {
   el.btnOpenNote.addEventListener('click', openNote);
 
   el.btnParse.addEventListener('click', () => parse());
+
+  if (el.modeSeg) {
+    el.modeSeg.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-mode]');
+      if (!btn) return;
+      state.captureMode = btn.dataset.mode;
+      for (const b of el.modeSeg.querySelectorAll('button')) b.classList.toggle('active', b === btn);
+      const ph = {
+        auto: '粘贴英文单词 / 句子，或一个网页链接…',
+        lookup: '想表达什么？输入中文，给出英文说法…',
+        note: '随手记一段想法或摘录，AI 只整理不改写…'
+      }[state.captureMode];
+      el.input.placeholder = ph;
+      el.input.focus();
+    });
+  }
 
   el.input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -2167,6 +2384,29 @@ function bind() {
 
     if (btn.dataset.open !== undefined) {
       openNote();
+      return;
+    }
+
+    if (btn.dataset.openUrl !== undefined) {
+      window.api.openUrl(btn.dataset.openUrl);
+      return;
+    }
+
+    if (btn.dataset.collectTerm !== undefined) {
+      const word = btn.dataset.collectTerm;
+      if (state.busy) return;
+      btn.disabled = true;
+      window.api.collectTerm(word).then((r) => {
+        btn.disabled = false;
+        if (!r.ok) {
+          toast(r.error || '收录失败', 'warn');
+          return;
+        }
+        state.entries[r.entry.key] = r.entry;
+        renderAll();
+        btn.textContent = '已收录 ✓';
+        toast(r.isNew ? `「${word}」已收进复习` : `「${word}」已累计到第 ${r.entry.count} 次`);
+      });
       return;
     }
 
@@ -2393,6 +2633,15 @@ function bind() {
     if (state.expanded && !state.busy && !state.followBusy) {
       refreshClipboard(!state.lastResult);
     }
+  });
+  window.api.on('ui:capture', (payload) => {
+    if (!payload || !payload.text) return;
+    switchTab('jot');
+    el.input.value = payload.text;
+    autoGrow();
+    document.body.classList.remove('result-view');
+    el.composerWrap.classList.remove('hidden');
+    parse(payload.text);
   });
   window.api.on('ui:dev-query', (text) => {
     if (!text) return;

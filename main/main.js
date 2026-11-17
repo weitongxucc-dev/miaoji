@@ -3,7 +3,9 @@
 const { app, BrowserWindow, ipcMain, screen, clipboard, shell, dialog, Tray, Menu, globalShortcut, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 const { detectObsidian, DOWNLOAD_URL } = require('./obsidian-detect');
+const extract = require('./extract');
 
 /*
  * 数据默认放在 D:\秒记数据，避免占用 C 盘。
@@ -64,7 +66,7 @@ if (!ENV_DATA_DIR && DATA_DIR !== OLD_USER_DATA) {
 }
 
 const store = require('./store');
-const { askDeepSeek, askFollowUp, testConnection } = require('./ai');
+const { askDeepSeek, askFollowUp, testConnection, summarizeClip, cleanNote, lookupZh } = require('./ai');
 const obsidian = require('./obsidian');
 
 const PET_W = 128;
@@ -375,6 +377,70 @@ function registerShortcut() {
   } catch {
     /* 快捷键被占用时忽略 */
   }
+  try {
+    globalShortcut.register('CommandOrControl+Alt+S', () => captureSelection());
+  } catch {
+    /* 快捷键被占用时忽略 */
+  }
+}
+
+/**
+ * 划词抓取：优先用 Windows UI Automation 读取当前焦点元素里的选中文字；
+ * 失败的桌面应用退回到「模拟 Ctrl+C → 读剪贴板 → 还原剪贴板」。
+ */
+function readSelectionViaUia() {
+  const script = [
+    'Add-Type -AssemblyName UIAutomationClient;',
+    'Add-Type -AssemblyName UIAutomationTypes;',
+    '$el = [System.Windows.Automation.AutomationElement]::FocusedElement;',
+    'try {',
+    '  $tp = $el.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern);',
+    '  $sel = $tp.GetSelection();',
+    '  if ($sel -and $sel.Length -gt 0) { $sel[0].GetText(-1) }',
+    '} catch { "" }'
+  ].join('\n');
+  const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    timeout: 4000,
+    windowsHide: true,
+    encoding: 'utf8'
+  });
+  return String(out || '').trim();
+}
+
+function simulateCopy() {
+  execFileSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^c')"],
+    { timeout: 4000, windowsHide: true }
+  );
+}
+
+async function captureSelection() {
+  if (!win || win.isFocused()) return; // 在自己窗口里不抢
+  let text = '';
+  try {
+    text = readSelectionViaUia();
+  } catch {
+    text = '';
+  }
+  if (!text) {
+    const prev = clipboard.readText();
+    try {
+      simulateCopy();
+      await new Promise((r) => setTimeout(r, 200));
+      const copied = clipboard.readText();
+      if (copied && copied !== prev) text = copied;
+      clipboard.writeText(prev || '');
+    } catch {
+      text = '';
+    }
+  }
+  text = String(text || '').trim().slice(0, 8000);
+  if (!text) return;
+  expand();
+  setTimeout(() => {
+    if (win && !win.isDestroyed()) win.webContents.send('ui:capture', { text, source: 'selection' });
+  }, 160);
 }
 
 /* ---------------- IPC ---------------- */
@@ -458,17 +524,37 @@ ipcMain.handle('ai:test', async () => {
 
 ipcMain.handle('clipboard:read', () => clipboard.readText() || '');
 
-ipcMain.handle('ai:query', async (_e, text) => {
+ipcMain.handle('ai:query', async (_e, text, mode) => {
   const input = String(text || '').trim();
   if (!input) return { ok: false, error: '先输入要查的内容' };
   try {
     const conf = store.loadConfig();
-    const fresh = await askDeepSeek(input, conf);
+    const m = ['auto', 'lookup', 'note'].includes(mode) ? mode : 'auto';
+    let fresh;
+    let explicitKey = '';
+
+    if (m === 'lookup') {
+      fresh = await lookupZh(input, conf);
+    } else if (m === 'note') {
+      fresh = await cleanNote(input, conf);
+    } else if (/^https?:\/\/\S+$/i.test(input)) {
+      // 链接 → 抓正文、摘要、术语标注，原文一起保存
+      const page = await extract.extractFromUrl(input);
+      fresh = await summarizeClip(page, conf);
+      explicitKey = store.clipKeyFor(page.url);
+    } else if (/[一-龥]/.test(input) && input.length >= 40 && !/[a-zA-Z]{4,}/.test(input)) {
+      // 较长的纯中文输入按「闪念」处理，避免被当成术语
+      fresh = await cleanNote(input, conf);
+    } else {
+      fresh = await askDeepSeek(input, conf);
+    }
+
     // AI 建议的学习方向（名称）映射成 id
     if (fresh.track) {
       const hit = (conf.tracks || []).find((t) => t.name === fresh.track);
       fresh.track = hit ? hit.id : '';
     }
+    if (explicitKey) fresh.key = explicitKey;
     const { entry, isNew } = store.upsertEntry(fresh);
     const all = store.listEntries();
     let write;
@@ -481,6 +567,36 @@ ipcMain.handle('ai:query', async (_e, text) => {
   } catch (err) {
     return { ok: false, error: err && err.message ? err.message : String(err) };
   }
+});
+
+ipcMain.handle('term:collect', async (_e, word) => {
+  const text = String(word || '').trim();
+  if (!text) return { ok: false, error: '术语为空' };
+  try {
+    const conf = store.loadConfig();
+    const fresh = await askDeepSeek(text, conf);
+    if (fresh.track) {
+      const hit = (conf.tracks || []).find((t) => t.name === fresh.track);
+      fresh.track = hit ? hit.id : '';
+    }
+    const { entry, isNew } = store.upsertEntry(fresh);
+    let write = { ok: true, skipped: true };
+    try {
+      write = obsidian.upsert(entry, store.listEntries(), conf);
+    } catch (err) {
+      write = { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+    return { ok: true, entry, isNew, obsidian: write };
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('app:open-url', (_e, url) => {
+  const u = String(url || '');
+  if (!/^https?:\/\//i.test(u)) return { ok: false, error: '只支持网页链接' };
+  shell.openExternal(u);
+  return { ok: true };
 });
 
 ipcMain.handle('review:submit', (_e, key, grade) => {

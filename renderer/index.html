@@ -121,8 +121,13 @@
       <section id="view-jot" class="view active">
         <div id="composerWrap" class="composer-wrap">
           <div class="composer">
-            <textarea id="input" rows="2" spellcheck="false" placeholder="粘贴或输入英文单词 / 句子…"></textarea>
+            <textarea id="input" rows="2" spellcheck="false" placeholder="粘贴英文单词 / 句子，或一个网页链接…"></textarea>
             <div class="composer-bar">
+              <div class="seg mode-seg" id="modeSeg" title="选择记录类型">
+                <button data-mode="auto" class="active">查词</button>
+                <button data-mode="lookup">中→英</button>
+                <button data-mode="note">闪念</button>
+              </div>
               <button id="clipChip" class="clip-chip hidden" title="点击填入剪贴板内容"></button>
               <button id="btnParse" class="btn primary parse-btn">
                 <span>解析</span><svg class="ico sm"><use href="#i-send"></use></svg>
@@ -285,6 +290,7 @@
               <div class="key-row"><kbd>Shift + Enter</kbd><span>输入框内换行</span></div>
               <div class="key-row"><kbd>Esc</kbd><span>收起面板</span></div>
               <div class="key-row"><kbd>Ctrl + Alt + M</kbd><span>全局唤出 / 收起</span></div>
+              <div class="key-row"><kbd>Ctrl + Alt + S</kbd><span>选中文字直接送进秒记</span></div>
               <div class="key-row"><kbd>空格</kbd><span>回顾中：翻面看答案</span></div>
               <div class="key-row"><kbd>1 / 2 / 3</kbd><span>回顾中：没想起 / 模糊 / 想起来了</span></div>
             </div>

@@ -182,9 +182,38 @@ function keyFor(text) {
     .trim();
 }
 
+/** 剪藏按网址去重：同一个链接再次保存时更新内容，不新增词条 */
+function clipKeyFor(url) {
+  const u = String(url || '').trim();
+  return u ? 'clip:' + u.replace(/#.*$/, '') : '';
+}
+
+function sanitizeSource(raw) {
+  const s = raw && typeof raw === 'object' ? raw : {};
+  return {
+    type: ['url', 'selection', 'clipboard', 'manual'].includes(s.type) ? s.type : 'manual',
+    url: String(s.url || '').slice(0, 2000),
+    title: String(s.title || '').slice(0, 200),
+    site: String(s.site || '').slice(0, 120),
+    capturedAt: String(s.capturedAt || '').slice(0, 40)
+  };
+}
+
+function sanitizeTerms(raw) {
+  return (Array.isArray(raw) ? raw : [])
+    .map((t) => {
+      if (typeof t === 'string') return { word: t.trim(), meaning: '' };
+      return { word: String((t && (t.word || t.term)) || '').trim(), meaning: String((t && t.meaning) || '').trim() };
+    })
+    .filter((t) => t.word)
+    .slice(0, 40);
+}
+
 function upsertEntry(fresh) {
   const data = loadEntries();
-  const key = keyFor(fresh.word || '');
+  // 剪藏用 clip:<url> 作主键；其它类型用词条文本
+  const explicitKey = String(fresh.key || '').trim();
+  const key = explicitKey || keyFor(fresh.word || '');
   if (!key) throw new Error('词条为空，无法记录');
 
   const now = new Date();
@@ -194,6 +223,11 @@ function upsertEntry(fresh) {
   const entry = {
     ...fresh,
     key,
+    kind: ['word', 'sentence', 'term', 'note', 'clip', 'lookup'].includes(fresh.kind) ? fresh.kind : 'word',
+    source: sanitizeSource(fresh.source),
+    original: typeof fresh.original === 'string' ? fresh.original : '',
+    summary: String(fresh.summary || ''),
+    terms: sanitizeTerms(fresh.terms),
     count: existing ? (existing.count || 1) + 1 : 1,
     firstAt: existing ? existing.firstAt : nowIso,
     lastAt: nowIso,
@@ -361,5 +395,6 @@ module.exports = {
   deleteEntry,
   getEntry,
   keyFor,
+  clipKeyFor,
   DIR
 };

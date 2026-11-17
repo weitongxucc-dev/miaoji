@@ -36,12 +36,36 @@ def _r(d, box, color):
     d.rectangle([x0, y0, x1 - 1, y1 - 1], fill=color)
 
 
+def _mouth(d, X, Y, mode):
+    """嘴巴：一条短横线，靠形状表达情绪，位置在眼睛下方、手臂上沿。"""
+    if mode == "sleep":
+        return
+    if mode == "happy":
+        # 微笑：横线两端上扬
+        _r(d, (X(14), Y(10), X(18), Y(11)), K)
+        _r(d, (X(13), Y(9), X(14), Y(10)), K)
+        _r(d, (X(18), Y(9), X(19), Y(10)), K)
+    elif mode == "surprised":
+        # 惊讶：张开的方嘴
+        _r(d, (X(15), Y(9), X(17), Y(11)), K)
+    elif mode == "smirk":
+        # 坏笑：嘴角单边挑起
+        _r(d, (X(15), Y(10), X(19), Y(11)), K)
+        _r(d, (X(19), Y(9), X(20), Y(10)), K)
+    elif mode == "squint":
+        # 眯眼：抿嘴
+        _r(d, (X(15), Y(10), X(18), Y(11)), K)
+    else:
+        _r(d, (X(15), Y(10), X(18), Y(11)), K)
+
+
 def bot_image(width, mode="idle", compact=False):
     """按目标宽度绘制机器人，透明背景，按整数像素对齐。
 
     眼睛由同一套网格生成：普通状态下是两块 3x4 的方块，
     look-* 让眼睛整体偏移，blink/sleep 压成一条横线，
     happy 变成拱形，think 上移，error 两侧不对称。
+    眼睛下方有一条嘴巴，形状随表情变化。
     """
     width = max(8, int(width))
     height = max(6, round(width * GRID_H / GRID_W))
@@ -94,6 +118,18 @@ def bot_image(width, mode="idle", compact=False):
         # 一只眼睛压低，做出困惑的表情
         _r(d, (X(left_x), Y(5), X(left_x + ew), Y(8)), K)
         _r(d, (X(right_x), Y(7), X(right_x + ew), Y(9)), K)
+    elif mode == "squint":
+        # 眯眯眼：两只眼睛都压成细线
+        _r(d, (X(left_x), Y(7), X(left_x + ew), Y(8)), K)
+        _r(d, (X(right_x), Y(7), X(right_x + ew), Y(8)), K)
+    elif mode == "surprised":
+        # 惊讶：眼睛更窄更高
+        _r(d, (X(left_x), Y(4), X(left_x + 2), Y(9)), K)
+        _r(d, (X(right_x + 1), Y(4), X(right_x + ew), Y(9)), K)
+    elif mode == "smirk":
+        # 坏笑：一只眼压低
+        _r(d, (X(left_x), Y(5), X(left_x + ew), Y(9)), K)
+        _r(d, (X(right_x), Y(6), X(right_x + ew), Y(9)), K)
     else:
         dx = 0
         dy = 0
@@ -107,6 +143,8 @@ def bot_image(width, mode="idle", compact=False):
             dy = 1
         _r(d, (X(left_x + dx), Y(5 + dy), X(left_x + ew + dx), Y(9 + dy)), K)
         _r(d, (X(right_x + dx), Y(5 + dy), X(right_x + ew + dx), Y(9 + dy)), K)
+
+    _mouth(d, X, Y, mode)
 
     return img
 
@@ -183,6 +221,7 @@ def write_ico(path, images):
 MODES = (
     "idle", "blink", "wink", "happy", "think", "error", "sleep",
     "look-left", "look-right", "look-up", "look-down",
+    "squint", "surprised", "smirk",
 )
 for mode in MODES:
     frames = square(bot_image(192, mode), 192)
@@ -216,7 +255,8 @@ tray_images[2].save(os.path.join(OUT, "tray.png"))
 # 预览图：深色终端底，两行展示全部表情
 labels = [
     ("idle", "待机"), ("blink", "眨眼"), ("wink", "单眼眨"), ("look-left", "看左"), ("look-right", "看右"), ("look-up", "看上"),
-    ("happy", "开心"), ("think", "思考"), ("error", "困惑"), ("sleep", "睡觉"), ("dots", "思考点"),
+    ("happy", "开心"), ("squint", "眯眯眼"), ("surprised", "惊讶"), ("smirk", "坏笑"),
+    ("think", "思考"), ("error", "困惑"), ("sleep", "睡觉"), ("dots", "思考点"),
 ]
 preview = Image.new("RGBA", (1320, 560), BG)
 pd = ImageDraw.Draw(preview)
