@@ -2,7 +2,7 @@
   "name": "miaoji",
   "version": "1.9.0",
   "private": true,
-  "description": "秒记 — 桌面悬浮英文生词速记本，自动写入 Obsidian",
+  "description": "秒记 — 桌面悬浮的跨领域术语记忆本：按学习方向解释、定期回顾，并写入 Obsidian",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
