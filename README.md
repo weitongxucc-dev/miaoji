@@ -187,9 +187,9 @@ main/
   obsidian-detect.js  Obsidian 安装与库检测
   preload.js    contextBridge 安全桥
 renderer/
-  index.html / styles.css / terminal.css / insight.css / app.js
+  index.html / tokens.css / app.css / app.js
   assets/       机器人表情帧
-  fonts/        Cubic 11 字体与 OFL 授权（历史资源，当前界面不引用）
+  fonts/        Cubic 11 字体与 OFL 授权（只用于品牌字标）
 assets/         应用图标、机器人动画帧、托盘图标
 tools/          像素图标生成脚本
 build/          NSIS 安装器脚本（默认 D 盘）

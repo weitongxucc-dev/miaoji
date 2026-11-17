@@ -1,0 +1,104 @@
+/* ============================================================
+   tokens.css · 秒记唯一的设计变量层
+   加载顺序：tokens.css → app.css
+   页面与组件只引用这里的变量，不再写死颜色、字号、圆角、间距。
+   每个值后面写选择理由；理由必须和秒记的用户或场景有关。
+   ============================================================ */
+
+:root {
+  /* ---------- 表面：暖纸，像摊开的笔记本 ---------- */
+  --paper: #F4EDDF;         /* 面板底色。偏黄的暖纸比纯白更像纸，长时间看不刺眼 */
+  --paper-raised: #FBF5E8;  /* 结果区、浮层。比纸面亮一档，表示「浮在纸上的卡片」 */
+  --paper-sunken: #FFF9EE;  /* 输入框、内嵌区域。最亮一档，暗示可写 */
+  --paper-inset: #EFE7D8;   /* 压入纸面的小块，如示例、答案底 */
+  --paper-head: #F1EADD;    /* 页头与禁用态。比纸面略深，和内容区分开 */
+
+  /* ---------- 墨色：从正文到元信息，分三档 ---------- */
+  --ink: #241E18;           /* 主文字。暖黑，不用纯黑，避免纸面上的硬边 */
+  --ink-2: #4A3D31;         /* 次级文字：释义补充、设置项说明 */
+  --ink-3: #6E5D4B;         /* 元信息：日期、计数、类型标签；不用于正文段落 */
+
+  /* ---------- 线：只用于输入框边界和真正需要的分隔 ---------- */
+  --line: #D8C7B0;          /* 输入框、按钮边界 */
+  --line-soft: #E7D9C5;     /* 弱分隔线，靠间距分不开时才用 */
+  --line-strong: #C9BFAD;   /* 需要明确可点的地方，如选项、下拉 */
+
+  /* ---------- 朱砂：印章色，只做强调 ---------- */
+  --accent: #B9452B;        /* 主操作、当前项、到期角标、印章。全界面只此一处红 */
+  --accent-deep: #A63A24;   /* 悬停、按下 */
+  --accent-soft: #F6D9C7;   /* 选中底、提示底 */
+  --on-accent: #FFFCF5;     /* 朱砂底上的文字 */
+
+  /* ---------- 语义色：纯色，不参与装饰 ---------- */
+  --success: #4C7A55;       /* 已掌握、成功。偏灰的绿，不和朱砂抢眼 */
+  --success-soft: #EDF2E6;  /* 正确、已掌握选项的底 */
+  --danger: #A83A2C;        /* 删除、失败。比朱砂深，和主操作区分 */
+  --danger-soft: #F9E5E0;
+  --danger-hover: #F2D6CF;
+  --warn-line: #C98E82;     /* 警告块边界 */
+
+  /* ---------- 交互底 ---------- */
+  --hover: #EFE7DA;         /* 列表行、按钮悬停 */
+  --hover-2: #E5DCC9;       /* 悬停再深一档：当前项 */
+  --placeholder: #6B6357;   /* 占位符，实测对输入框底 ≥ 4.5:1 */
+  --shade: #D9C6AC;         /* 极少数需要一点厚度的边界，如开关轨道 */
+
+  /* ---------- 字体：最多两个字族 ---------- */
+  --font-sans: 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', 'Noto Sans SC', sans-serif;
+  --font-serif: Georgia, 'Times New Roman', 'Songti SC', serif; /* 只给英文词头与英文例句 */
+  --font-pixel: 'Cubic 11', 'Microsoft YaHei', monospace;       /* 只给品牌与机器人 */
+  --font-mono: 'Consolas', 'Cascadia Mono', 'Microsoft YaHei UI', monospace; /* 只给计数、日期 */
+
+  /* ---------- 字号：6 档，其余一律归入最近一档 ---------- */
+  --text-meta: 11px;        /* 日期、计数、类型标签 */
+  --text-secondary: 12.5px; /* 次要说明、列表副标题 */
+  --text-body: 14px;        /* 正文、释义、设置项 */
+  --text-emphasis: 16px;    /* 小节标题、强调数字 */
+  --text-title: 20px;       /* 页面标题、剪藏 / 视频 / 闪念标题 */
+  --text-display: 26px;     /* 英文词头、短术语；长文本降到 20px 并换行 */
+
+  --leading-meta: 1.4;
+  --leading-secondary: 1.5;
+  --leading-body: 1.65;     /* 中文正文不低于 1.5，这里留到 1.65 */
+  --leading-heading: 1.3;
+
+  /* ---------- 间距：4 / 8 / 12 / 16 / 24 / 32 ---------- */
+  --space-hair: 2px;        /* 组件内部微调，不写魔法数 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* ---------- 圆角：小到几乎看不出来，纸面不圆润 ---------- */
+  --radius-control: 2px;
+  --radius-overlay: 4px;
+
+  /* ---------- 动效：只回应用户操作 ---------- */
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+
+  /* ---------- 旧变量名 → 新 token 的别名 ----------
+     第二批合并 CSS 时保留，方便逐条迁移；
+     迁移完成后这些别名应删除，不再新增使用。 */
+  --paper-2: var(--paper-raised);
+  --paper-3: var(--paper-sunken);
+  --surface: var(--paper-raised);
+  --field: var(--paper-sunken);
+  --sunken: var(--paper-inset);
+  --head: var(--paper-head);
+  --muted: var(--ink-3);
+  --faint: var(--ink-3);
+  --line-2: var(--line-soft);
+  --seal: var(--accent);
+  --seal-soft: var(--accent-soft);
+  --green: var(--success);
+  --orange: var(--accent);
+  --orange-deep: var(--accent-deep);
+  --orange-soft: var(--accent-soft);
+  --verm: var(--accent);
+  --verm-deep: var(--accent-deep);
+  --shadow: var(--shade);
+}

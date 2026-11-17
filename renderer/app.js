@@ -1371,7 +1371,7 @@ function hotItemHTML(e) {
     <span class="hot-main">
       <span class="hot-word-line">
         <span class="lib-kind">${esc(info.label)}</span>
-        <span class="hot-word">${esc(e.word)}</span>
+        <span class="hot-word${e.kind === 'word' ? ' is-word' : ''}">${esc(e.word)}</span>
       </span>
       <span class="hot-meaning">${esc(meaning)}</span>
       <span class="hot-meta">${bits.join('')}${threadDot}</span>
@@ -1570,7 +1570,7 @@ function renderReviewCard() {
   if (!session.flipped) {
     el.reviewArea.innerHTML = `<div class="review-card">
       <div class="review-progress">${progress}</div>
-      <div class="review-term">${esc(entry.word)}</div>
+      <div class="review-term${entry.kind === 'word' ? ' is-latin' : ''}">${esc(entry.word)}</div>
       <div class="review-meta">${metaHTML}</div>
       <div class="review-hint">先想一下它的意思，再翻面。<br>按 <kbd>空格</kbd> 或点下面的按钮。</div>
       <button class="review-flip-btn" data-review-flip>显示答案</button>
@@ -1582,7 +1582,7 @@ function renderReviewCard() {
   const memory = plainText(entry.memory || '');
   el.reviewArea.innerHTML = `<div class="review-card">
     <div class="review-progress">${progress}</div>
-    <div class="review-term">${esc(entry.word)}</div>
+    <div class="review-term${entry.kind === 'word' ? ' is-latin' : ''}">${esc(entry.word)}</div>
     <div class="review-meta">${metaHTML}</div>
     <div class="review-answer">
       <div class="review-meaning">${esc(truncate(meaning, 160))}</div>

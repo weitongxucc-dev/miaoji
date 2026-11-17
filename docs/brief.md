@@ -65,8 +65,8 @@ Windows 桌面（Electron，无边框固定面板 **440×680**，始终置顶，
 
 ## 已有设计系统或代码库位置
 
-- 现有样式：`renderer/styles.css`、`renderer/terminal.css`、`renderer/insight.css`（本期合并）。
-- 本期新增：`renderer/tokens.css`。
+- 设计 token：`renderer/tokens.css`（唯一变量来源）。
+- 组件样式：`renderer/app.css`（由原 styles / terminal / insight 三层合并）。
 - 页面结构：`renderer/index.html`；交互：`renderer/app.js`。
 - 主进程：`main/`；构建配置：`package.json`、`build/installer.nsh`。
 

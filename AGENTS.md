@@ -98,7 +98,7 @@
 ## 9. 文件地图
 
 - `main/`：主进程（`main.js` 入口与 IPC、`store.js` 数据/配置、`ai.js` DeepSeek、`extract.js` 网页提取、`video.js` yt-dlp、`update.js` 更新检查、`agent.js` 助手工具循环、`preload.js` 预加载）。
-- `renderer/`：`index.html`、`app.js`、`styles.css`、`terminal.css`、`insight.css`；本期将新增 `tokens.css` 并合并三层皮肤。
+- `renderer/`：`index.html`、`app.js`、`tokens.css`（唯一变量来源）、`app.css`（组件层；由原 styles / terminal / insight 三层合并）。
 - `docs/brief.md`：产品定位、核心任务 Top 3、必须做与明确不做。
 - `docs/wireframes.md`：页面清单、每页 P0/P1/P2、ASCII 线框、状态清单。
 - `assets/`：品牌、机器人、图标资源。
