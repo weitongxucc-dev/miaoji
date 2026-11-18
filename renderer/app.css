@@ -3396,7 +3396,8 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
 
 .toast {
   top: auto;
-  bottom: 18px;
+  /* 底栏 48px，toast 抬到它上方，不再挡住「洞察」入口 */
+  bottom: 60px;
   transform: translate(-50%, 6px);
   border: 1px solid var(--line-strong);
   background: var(--surface);
@@ -4455,3 +4456,7 @@ button.note-status { cursor: pointer; text-decoration: underline dotted; text-un
   font-family: var(--font-serif);
   font-size: var(--text-body);
 }
+
+/* 长中文输入的建议面板（收录页）：去闪念页 or 仍然解析 */
+.note-suggest h3 { margin: 0 0 var(--space-1); font-size: var(--text-emphasis); color: var(--ink); }
+.note-suggest p { margin: 0 0 var(--space-2); color: var(--ink-2); font-size: var(--text-body); line-height: var(--leading-body); }

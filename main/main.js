@@ -665,10 +665,8 @@ ipcMain.handle('ai:query', async (_e, text, mode, trackId) => {
       });
       fresh = await summarizeClip(page, conf, forcedName);
       explicitKey = store.clipKeyFor(page.url);
-    } else if (/[一-龥]/.test(input) && input.length >= 40 && !/[a-zA-Z]{4,}/.test(input)) {
-      // 较长的纯中文输入按「闪念」处理，避免被当成术语
-      fresh = await cleanNote(input, conf, forcedName);
     } else {
+      // 不再按「长纯中文自动当闪念」：收录页只负责解释，闪念走独立页面
       fresh = await askDeepSeek(input, conf, forcedName);
     }
 
@@ -716,6 +714,8 @@ ipcMain.handle('term:collect', async (_e, word, trackId) => {
 function buildRawNote(raw, forcedTrack) {
   const firstLine = raw.split('\n').map((s) => s.trim()).find(Boolean) || '';
   return {
+    // 每条闪念独立成键，避免首行相同的两条互相覆盖（2026-11-18 确认）
+    key: 'note:' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
     kind: 'note',
     word: firstLine.slice(0, 20) || '闪念',
     summary: '',

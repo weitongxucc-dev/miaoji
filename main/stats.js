@@ -8,6 +8,10 @@ const store = require('./store');
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
+// 「收录量 / 领域覆盖」只统计术语类词条；闪念、剪藏是记录与来源，不算术语积累。
+// 复习次数（reviewed / streak 里的复习日）仍覆盖整个复习队列（含主动加入的闪念）。
+const TERM_KINDS = new Set(['word', 'sentence', 'term', 'lookup']);
+
 function dayKey(input) {
   const d = new Date(input);
   if (Number.isNaN(d.getTime())) return '';
@@ -55,7 +59,8 @@ function overview(range) {
   }
   const byDate = new Map(days.map((d) => [d.date, d]));
 
-  for (const e of all) {
+  const terms = all.filter((e) => TERM_KINDS.has(e.kind));
+  for (const e of terms) {
     const k = dayKey(e.firstAt);
     if (byDate.has(k)) byDate.get(k).added += 1;
   }
@@ -69,9 +74,11 @@ function overview(range) {
   // 连续学习天数：从今天（今天还没学则从昨天）往回数，每天至少新增或复习过一次
   // 用全量记录计算，而不是只看这 7 天，否则长期坚持会被截成 7
   const active = new Set();
-  for (const e of all) {
+  for (const e of terms) {
     const k = dayKey(e.firstAt);
     if (k) active.add(k);
+  }
+  for (const e of all) {
     for (const r of Array.isArray(e.reviews) ? e.reviews : []) {
       const rk = r && r.at ? dayKey(r.at) : '';
       if (rk) active.add(rk);
@@ -88,7 +95,7 @@ function overview(range) {
   }
 
   const trackStats = tracks.map((t) => {
-    const list = all.filter((e) => e.track === t.id);
+    const list = terms.filter((e) => e.track === t.id);
     return {
       id: t.id,
       name: t.name,
@@ -96,7 +103,7 @@ function overview(range) {
       graduated: list.filter((e) => e.graduated || e.mastered).length
     };
   }).sort((a, b) => b.count - a.count);
-  const noTrack = all.filter((e) => !e.track || !tracks.some((t) => t.id === e.track)).length;
+  const noTrack = terms.filter((e) => !e.track || !tracks.some((t) => t.id === e.track)).length;
 
   const kindCounts = {};
   for (const e of all) kindCounts[e.kind || 'word'] = (kindCounts[e.kind || 'word'] || 0) + 1;
@@ -134,7 +141,7 @@ function overview(range) {
     noTrack,
     kinds: kindCounts,
     weak,
-    total: all.length
+    total: terms.length
   };
 }
 
@@ -161,7 +168,7 @@ function suggestions(data, conf) {
     if (thin) list.push({ id: 'thin-track', text: `「${thin.name}」方向只有 ${thin.count} 个词，遇到相关文章可以剪藏一篇补一补。`, action: 'capture' });
   }
   if (!d.total) {
-    list.push({ id: 'first', text: '还没有任何记录。复制一个想弄懂的词，点开机器人回车就行。', action: 'capture' });
+    list.push({ id: 'first', text: '还没有术语记录。复制一个想弄懂的词，点开机器人回车就行。', action: 'capture' });
   }
   if (!d.rangeReviewed && d.total > 0) {
     list.push({ id: 'no-review', text: '这段时间还没有复习记录。收藏不会自动变成掌握，去回顾页翻几张卡。', action: 'review' });

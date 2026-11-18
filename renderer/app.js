@@ -778,10 +778,15 @@ async function reloadEntries() {
   }
 }
 
+// 「已收 / 今天 / 累计」只统计术语类词条（term / word / sentence / lookup）；
+// 闪念、剪藏是记录与来源，不算「术语积累」。复习相关计数仍覆盖整个复习队列。
+const TERMISH_KINDS = ['term', 'word', 'sentence', 'lookup'];
+
 function stats() {
   const all = Object.values(state.entries);
-  const today = all.filter((e) => isToday(e.lastAt)).length;
-  const hot = all.filter((e) => !e.mastered && (e.count || 1) >= (state.config?.hotThreshold || 3)).length;
+  const terms = all.filter((e) => TERMISH_KINDS.includes(e.kind));
+  const today = terms.filter((e) => isToday(e.lastAt)).length;
+  const hot = terms.filter((e) => !e.mastered && (e.count || 1) >= (state.config?.hotThreshold || 3)).length;
   const now = Date.now();
   const due = all.filter((e) => !e.mastered && !e.graduated && e.nextReviewAt && new Date(e.nextReviewAt).getTime() <= now);
   const todayStr = new Date().toDateString();
@@ -791,9 +796,9 @@ function stats() {
       if (r && r.at && new Date(r.at).toDateString() === todayStr) doneToday += 1;
     }
   }
-  const reviewedWords = all.filter((e) => Array.isArray(e.reviews) && e.reviews.length > 0).length;
-  const stable = all.filter((e) => e.graduated || e.mastered).length;
-  return { total: all.length, today, hot, due, doneToday, reviewedWords, stable };
+  const reviewedWords = terms.filter((e) => Array.isArray(e.reviews) && e.reviews.length > 0).length;
+  const stable = terms.filter((e) => e.graduated || e.mastered).length;
+  return { total: terms.length, today, hot, due, doneToday, reviewedWords, stable };
 }
 
 function renderStats() {
@@ -847,7 +852,7 @@ function entryGist(e) {
 
 function countPill(e) {
   const n = e.count || 1;
-  return `<span class="count-pill${n <= 1 ? ' is-new' : ''}">${n <= 1 ? 'NEW' : n + '次'}</span>`;
+  return `<span class="count-pill${n <= 1 ? ' is-new' : ''}">${n <= 1 ? '新' : n + ' 次'}</span>`;
 }
 
 const KIND_INFO = {
@@ -1318,6 +1323,25 @@ function renderError(message) {
   setPetMode('error', 1400);
 }
 
+/** 长中文输入的建议面板：去闪念页记下，或仍然按术语解析 */
+function renderNoteSuggest(text) {
+  stopEmptyRobot();
+  state.lastResult = null;
+  state.pendingSuggest = text;
+  document.body.classList.remove('result-view');
+  el.composerWrap.classList.remove('hidden');
+  el.result.innerHTML = `<div class="state-card note-suggest">
+    <h3>这段更像一条闪念</h3>
+    <p>较长的中文段落记成闪念更合适：先原样保存，AI 只整理不改写。</p>
+    <div class="error-actions">
+      <button class="btn sm primary" data-note-goto>去闪念页记下</button>
+      <button class="btn sm ghost" data-parse-anyway>仍然解析</button>
+    </div>
+  </div>`;
+  el.input.value = text;
+  autoGrow();
+}
+
 function renderResult() {
   stopEmptyRobot();
   if (!state.lastResult) {
@@ -1753,11 +1777,15 @@ function renderReviewCard() {
   const progress = `回顾 · ${session.idx + 1}/${session.ids.length}`;
 
   if (!session.flipped) {
+    // 快捷键提示只在本轮第一张卡出现，之后只留一句短提示（已确认线框）
+    const hint = session.idx === 0
+      ? `先想一下它的意思，再翻面。<br>按 <kbd>空格</kbd> 或点下面的按钮。`
+      : '先回忆，再翻面。';
     el.reviewArea.innerHTML = `<div class="review-card">
       <div class="review-progress">${progress}</div>
       <div class="review-term${entry.kind === 'word' ? ' is-latin' : ''}">${esc(entry.word)}</div>
       <div class="review-meta">${metaHTML}</div>
-      <div class="review-hint">先想一下它的意思，再翻面。<br>按 <kbd>空格</kbd> 或点下面的按钮。</div>
+      <div class="review-hint">${hint}</div>
       <button class="review-flip-btn" data-review-flip>显示答案</button>
     </div>`;
     return;
@@ -2274,7 +2302,7 @@ function setParseBusy(busy) {
   if (label) label.textContent = busy ? '解析中' : '解析';
 }
 
-async function parse(text, mode) {
+async function parse(text, force) {
   if (state.busy) return;
   if (state.followBusy) {
     toast('等这次追问回答完再收录新术语', 'warn');
@@ -2284,6 +2312,11 @@ async function parse(text, mode) {
   if (!input) {
     toast('先输入一个术语或链接');
     el.input.focus();
+    return;
+  }
+  // 较长的纯中文更像一条闪念：不再默默当闪念收录，先问一句（仍然解析可跳过）
+  if (!force && /[一-龥]/.test(input) && input.length >= 40 && !/[a-zA-Z]{4,}/.test(input)) {
+    renderNoteSuggest(input);
     return;
   }
 
@@ -3391,6 +3424,23 @@ function bind() {
 
     if (btn.dataset.retry !== undefined) {
       parse(state.lastInput);
+      return;
+    }
+
+    if (btn.dataset.noteGoto !== undefined) {
+      const text = state.pendingSuggest || '';
+      state.pendingSuggest = '';
+      el.input.value = '';
+      autoGrow();
+      el.result.innerHTML = '';
+      switchTab('note');
+      el.noteInput.value = text;
+      el.noteInput.focus();
+      return;
+    }
+
+    if (btn.dataset.parseAnyway !== undefined) {
+      parse(state.pendingSuggest || '', true);
       return;
     }
 
