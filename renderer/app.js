@@ -1127,7 +1127,7 @@ function dossierHTML(e) {
   }
   if (e.source && e.source.site && isClip) meta.push(`<span class="src-tag">${esc(e.source.site)}</span>`);
   if (e.phonetic) meta.push(`<span class="phon">${esc(e.phonetic)}</span>`);
-  if (e.pos) meta.push(`<span class="pos-tag">${esc(e.pos)}</span>`);
+  if (e.pos && e.pos !== kindLabel(e)) meta.push(`<span class="pos-tag">${esc(e.pos)}</span>`);
   if (e.mastered) meta.push('<span class="pos-tag">已掌握</span>');
   if (tracks.length) {
     const options = ['<option value="">方向</option>']
@@ -1775,7 +1775,7 @@ function renderReviewCard() {
   if (track) metaBits.push(`<span class="review-track">${esc(track)}</span>`);
   if (entry.graduated && !entry.mastered) metaBits.push('<span class="pos-tag review-grad-tag">毕业确认</span>');
   const metaHTML = metaBits.join('');
-  const progress = `回顾 · ${session.idx + 1}/${session.ids.length}`;
+  const progress = `回顾 ${session.idx + 1}/${session.ids.length}`;
 
   if (!session.flipped) {
     // 快捷键提示只在本轮第一张卡出现，之后只留一句短提示（已确认线框）
@@ -1800,7 +1800,7 @@ function renderReviewCard() {
     <div class="review-meta">${metaHTML}</div>
     <div class="review-answer">
       <div class="review-meaning">${esc(truncate(meaning, 160))}</div>
-      ${memory ? `<div class="review-extra"><span class="lbl">为什么重要</span><br>${esc(truncate(memory, 120))}</div>` : ''}
+      ${memory ? `<div class="review-extra"><span class="lbl">${entry.kind === 'term' ? '为什么重要' : '记忆'}</span><br>${esc(truncate(memory, 120))}</div>` : ''}
       <div class="grade-row">${REVIEW_GRADES.map((g) => `
         <button class="grade-btn g${g.g}" data-review-grade="${g.g}">
           ${g.label}<small>${g.key} · ${g.hint}</small>
