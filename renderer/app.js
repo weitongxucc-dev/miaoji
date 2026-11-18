@@ -1400,8 +1400,8 @@ function hotItemHTML(e) {
     if (e.terms && e.terms.length) bits.push(`<span>${e.terms.length} 个术语</span>`);
   } else if (e.kind === 'note') {
     bits.push(`<span>${fmtShort(e.lastAt)}</span>`);
-  } else {
-    bits.push(`<span>${e.count || 1} 次</span>`);
+  } else if ((e.count || 1) > 1) {
+    bits.push(`<span>收过 ${e.count} 次</span>`);
   }
   const threadDot = Array.isArray(e.thread) && e.thread.length
     ? '<span class="thread-dot" title="有追问"></span>'
@@ -1413,7 +1413,7 @@ function hotItemHTML(e) {
         <span class="hot-word${e.kind === 'word' ? ' is-word' : ''}">${esc(e.word)}</span>
       </span>
       <span class="hot-meaning">${esc(meaning)}</span>
-      <span class="hot-meta">${bits.join('')}${threadDot}</span>
+      ${bits.length || threadDot ? `<span class="hot-meta">${bits.join('')}${threadDot}</span>` : ''}
     </span>
     <span class="chev">${icon('i-chevron')}</span>
   </button>`;
@@ -1549,7 +1549,7 @@ function noteStatus(e) {
 function renderNoteView() {
   if (!el.noteList) return;
   const notes = noteEntries();
-  if (el.noteCount) el.noteCount.textContent = String(notes.length);
+  if (el.noteCount) el.noteCount.textContent = notes.length + ' 条';
   // 方向下拉：保留当前选择；「未指定方向」排在最前
   const prev = state.noteTrack;
   const options = ['<option value="">未指定方向</option>']
@@ -1564,7 +1564,8 @@ function renderNoteView() {
 function renderNoteList() {
   if (!el.noteList) return;
   const notes = noteEntries();
-  if (el.noteCount) el.noteCount.textContent = String(notes.length);
+  if (el.noteCount) el.noteCount.textContent = notes.length + ' 条';
+  if (el.noteAll) el.noteAll.classList.toggle('hidden', notes.length <= 30);
   if (!notes.length) {
     el.noteList.innerHTML = `<div class="note-empty">
       <p>还没有闪念。想到什么就写下来，AI 随后整理，不打断记录。</p>
@@ -2121,7 +2122,7 @@ function statsHTML(d) {
     ${d.total === 0
       ? `<p class="stats-anchor">还没有领域记录。收下第一个术语，它就会按方向归到这里。</p>
          <div class="stats-anchor-action"><button class="btn ghost sm" data-suggest-action="jot">去收录术语</button></div>`
-      : `<p class="stats-anchor">${esc(rangeLabel)}在 <b>${d.tracks.length}</b> 个领域收了 <b>${d.rangeAdded}</b> 条术语</p>`}
+      : `<p class="stats-anchor">${esc(rangeLabel)}${d.tracks.length ? `在 <b>${d.tracks.length}</b> 个领域` : ''}收了 <b>${d.rangeAdded}</b> 条术语</p>`}
     <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : `复习 <b>${d.rangeReviewed}</b> 次 · ${d.streak ? `连续 <b>${d.streak}</b> 天` : '今天还没开始'}`}</p>
     <div class="stats-hero">
       <div class="stat-tile"><b>${d.total}</b><span>收录</span></div>
