@@ -480,6 +480,7 @@ function canEmptyIdle() {
     !state.followBusy &&
     !robot.emptyGazeClip &&
     !robot.emptyWilding &&
+    !robot.emptyFrenzy &&
     robot.emptyBody &&
     robot.emptyBody.isConnected &&
     document.visibilityState === 'visible'
@@ -490,13 +491,18 @@ function stopEmptyRobot() {
   clearTimeout(robot.emptyIdleTimer);
   clearTimeout(robot.emptyClipTimer);
   clearInterval(robot.emptyWildTimer);
+  clearTimeout(robot.emptyFrenzyTimer);
+  clearInterval(robot.emptyFrenzyFaceTimer);
   robot.emptyIdleTimer = 0;
   robot.emptyClipTimer = 0;
   robot.emptyWildTimer = 0;
+  robot.emptyFrenzyTimer = 0;
+  robot.emptyFrenzyFaceTimer = 0;
   robot.emptyWilding = false;
+  robot.emptyFrenzy = false;
   robot.emptyGazeClip = '';
   if (robot.emptyBody) {
-    robot.emptyBody.classList.remove('is-tilt-left', 'is-tilt-right', 'is-squash', 'is-hop', 'is-wild');
+    robot.emptyBody.classList.remove('is-tilt-left', 'is-tilt-right', 'is-squash', 'is-hop', 'is-wild', 'is-frenzy');
   }
   robot.emptyBody = null;
   robot.emptyImg = null;
@@ -548,27 +554,72 @@ function stopEmptyWild() {
   if (canEmptyIdle()) scheduleEmptyIdle(900);
 }
 
+/** 点一下空状态机器人：连跳几下，配惊讶和笑脸 */
+function startEmptyFrenzy() {
+  if (reducedMotion.matches || robot.emptyFrenzy || robot.emptyWilding) return;
+  const body = robot.emptyBody;
+  const img = robot.emptyImg;
+  if (!body || !img) return;
+  robot.emptyFrenzy = true;
+  clearTimeout(robot.emptyIdleTimer);
+  clearTimeout(robot.emptyClipTimer);
+  robot.emptyIdleTimer = 0;
+  robot.emptyClipTimer = 0;
+  robot.emptyGazeClip = '';
+  body.classList.remove('is-tilt-left', 'is-tilt-right', 'is-squash', 'is-hop', 'is-wild');
+  body.classList.add('is-frenzy');
+
+  const faces = ['surprised', 'happy', 'wink', 'squint', 'surprised', 'happy'];
+  let i = 0;
+  const frame = () => {
+    img.src = robotSrc(faces[i % faces.length], false);
+    i += 1;
+  };
+  frame();
+  robot.emptyFrenzyFaceTimer = setInterval(frame, 160);
+  robot.emptyFrenzyTimer = setTimeout(stopEmptyFrenzy, 1200);
+}
+
+function stopEmptyFrenzy() {
+  if (!robot.emptyFrenzy) return;
+  robot.emptyFrenzy = false;
+  clearTimeout(robot.emptyFrenzyTimer);
+  clearInterval(robot.emptyFrenzyFaceTimer);
+  robot.emptyFrenzyTimer = 0;
+  robot.emptyFrenzyFaceTimer = 0;
+  if (robot.emptyBody) robot.emptyBody.classList.remove('is-frenzy');
+  if (robot.emptyImg) robot.emptyImg.src = robotSrc('idle', false);
+  if (canEmptyIdle()) scheduleEmptyIdle(900);
+}
+
 function bindEmptyWild(body) {
   let holdTimer = 0;
   let pressed = false;
+  let pressAt = 0;
   const down = (e) => {
     if (e.button !== undefined && e.button !== 0) return;
     pressed = true;
+    pressAt = performance.now();
     clearTimeout(holdTimer);
     holdTimer = setTimeout(() => {
       if (pressed) startEmptyWild();
     }, 480);
   };
-  const up = () => {
+  const cancel = () => {
     pressed = false;
     clearTimeout(holdTimer);
     holdTimer = 0;
+  };
+  const up = () => {
+    const quick = pressed && performance.now() - pressAt < 480 && !robot.emptyWilding && !robot.emptyFrenzy;
+    cancel();
     stopEmptyWild();
+    if (quick) startEmptyFrenzy();
   };
   body.addEventListener('pointerdown', down);
   body.addEventListener('pointerup', up);
-  body.addEventListener('pointercancel', up);
-  body.addEventListener('pointerleave', up);
+  body.addEventListener('pointercancel', cancel);
+  body.addEventListener('pointerleave', cancel);
 }
 
 function scheduleEmptyIdle(delay) {
@@ -634,7 +685,7 @@ function runEmptyIdleClip() {
 function onEmptyGaze(e) {
   const body = robot.emptyBody;
   const img = robot.emptyImg;
-  if (!body || !img || robot.emptyWilding) return;
+  if (!body || !img || robot.emptyWilding || robot.emptyFrenzy) return;
 
   const r = body.getBoundingClientRect();
   const pad = 14;
