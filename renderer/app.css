@@ -2746,6 +2746,8 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
   height: 100%;
   margin: 0;
   image-rendering: pixelated;
+  -webkit-user-drag: none;
+  user-select: none;
   animation: none;
   transform-origin: 50% 92%;
 }
@@ -2753,6 +2755,7 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
 .empty-bot-body.is-tilt-right { transform: rotate(4deg) translateX(2px); }
 .empty-bot-body.is-squash { animation: pet-squash 420ms cubic-bezier(0.2, 0.8, 0.3, 1); }
 .empty-bot-body.is-hop { animation: robot-hop 560ms cubic-bezier(0.2, 0.8, 0.3, 1); }
+.empty-bot-body.is-wild .empty-bot { animation: avatar-wild 260ms steps(2, end) infinite; }
 .empty h3 {
   font-family: var(--font-sans);
   font-size: var(--text-title);

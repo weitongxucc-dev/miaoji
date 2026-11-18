@@ -479,6 +479,7 @@ function canEmptyIdle() {
     !state.busy &&
     !state.followBusy &&
     !robot.emptyGazeClip &&
+    !robot.emptyWilding &&
     robot.emptyBody &&
     robot.emptyBody.isConnected &&
     document.visibilityState === 'visible'
@@ -488,11 +489,14 @@ function canEmptyIdle() {
 function stopEmptyRobot() {
   clearTimeout(robot.emptyIdleTimer);
   clearTimeout(robot.emptyClipTimer);
+  clearInterval(robot.emptyWildTimer);
   robot.emptyIdleTimer = 0;
   robot.emptyClipTimer = 0;
+  robot.emptyWildTimer = 0;
+  robot.emptyWilding = false;
   robot.emptyGazeClip = '';
   if (robot.emptyBody) {
-    robot.emptyBody.classList.remove('is-tilt-left', 'is-tilt-right', 'is-squash', 'is-hop');
+    robot.emptyBody.classList.remove('is-tilt-left', 'is-tilt-right', 'is-squash', 'is-hop', 'is-wild');
   }
   robot.emptyBody = null;
   robot.emptyImg = null;
@@ -506,7 +510,65 @@ function startEmptyRobot() {
   robot.emptyBody = body;
   robot.emptyImg = img;
   img.src = robotSrc('idle', false);
+  bindEmptyWild(body);
   scheduleEmptyIdle(rand(700, 1500));
+}
+
+/** 长按空状态机器人：换成发疯表情并抖动，松手恢复 */
+function startEmptyWild() {
+  if (reducedMotion.matches || robot.emptyWilding) return;
+  const body = robot.emptyBody;
+  const img = robot.emptyImg;
+  if (!body || !img) return;
+  robot.emptyWilding = true;
+  clearTimeout(robot.emptyIdleTimer);
+  clearTimeout(robot.emptyClipTimer);
+  robot.emptyIdleTimer = 0;
+  robot.emptyClipTimer = 0;
+  robot.emptyGazeClip = '';
+  body.classList.remove('is-tilt-left', 'is-tilt-right', 'is-squash', 'is-hop');
+  body.classList.add('is-wild');
+
+  let i = 0;
+  const frame = () => {
+    img.src = robotSrc(PET_WILD_FRAMES[i % PET_WILD_FRAMES.length], false);
+    i += 1;
+  };
+  frame();
+  robot.emptyWildTimer = setInterval(frame, 110);
+}
+
+function stopEmptyWild() {
+  if (!robot.emptyWilding) return;
+  robot.emptyWilding = false;
+  clearInterval(robot.emptyWildTimer);
+  robot.emptyWildTimer = 0;
+  if (robot.emptyBody) robot.emptyBody.classList.remove('is-wild');
+  if (robot.emptyImg) robot.emptyImg.src = robotSrc('idle', false);
+  if (canEmptyIdle()) scheduleEmptyIdle(900);
+}
+
+function bindEmptyWild(body) {
+  let holdTimer = 0;
+  let pressed = false;
+  const down = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    pressed = true;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      if (pressed) startEmptyWild();
+    }, 480);
+  };
+  const up = () => {
+    pressed = false;
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+    stopEmptyWild();
+  };
+  body.addEventListener('pointerdown', down);
+  body.addEventListener('pointerup', up);
+  body.addEventListener('pointercancel', up);
+  body.addEventListener('pointerleave', up);
 }
 
 function scheduleEmptyIdle(delay) {
@@ -572,7 +634,7 @@ function runEmptyIdleClip() {
 function onEmptyGaze(e) {
   const body = robot.emptyBody;
   const img = robot.emptyImg;
-  if (!body || !img) return;
+  if (!body || !img || robot.emptyWilding) return;
 
   const r = body.getBoundingClientRect();
   const pad = 14;
