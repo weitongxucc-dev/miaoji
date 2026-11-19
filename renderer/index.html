@@ -75,7 +75,7 @@
     </symbol>
   </svg>
 
-  <div id="pet" class="pet" role="button" tabindex="0" aria-label="打开秒记" title="秒记 · 点击展开，拖动移动">
+  <div id="pet" class="pet" role="button" tabindex="0" aria-label="打开秒记" title="点击展开，拖动移动">
     <div id="bubble" class="bubble hidden"><span id="petCount">0</span></div>
     <div id="petBody" class="pet-body">
       <img id="petImg" class="pet-img" src="assets/robot-idle.png" alt="" draggable="false">
@@ -85,10 +85,10 @@
 
   <div id="panel" class="panel">
     <header class="panel-head">
-      <div class="brand" id="brand" role="button" tabindex="0" title="单击收起 · 长按看看机器人" aria-label="单击收起，长按看看机器人">
+      <div class="brand" id="brand" role="button" tabindex="0" title="单击收起，长按看看机器人" aria-label="单击收起，长按看看机器人">
         <span class="avatar"><img id="headAvatar" src="assets/robot-idle.png" alt=""></span>
         <div class="brand-text">
-          <h1><span class="brand-name">秒记</span><span class="caret" aria-hidden="true"></span></h1>
+          <h1><span class="brand-name">秒记</span></h1>
           <p id="headStat">今天还没收录</p>
         </div>
       </div>
@@ -103,19 +103,18 @@
     <main class="views">
       <section id="view-jot" class="view active">
         <div id="composerWrap" class="composer-wrap">
+          <div class="composer-track-row">
+            <label class="capture-track">
+              <span>方向</span>
+              <select id="captureTrack" aria-label="当前学习方向"></select>
+            </label>
+          </div>
           <div class="composer">
-            <div class="composer-track-row">
-              <label class="capture-track" title="学习方向决定 AI 按哪个领域解释；同一个术语换方向会另存一条">
-                <span>方向</span>
-                <select id="captureTrack" aria-label="当前学习方向"></select>
-              </label>
-              <button id="captureTrackAdd" class="capture-track-add hidden" type="button">添加方向</button>
-            </div>
-            <textarea id="input" rows="2" spellcheck="false" placeholder="单词、术语、句子，或一个链接…"></textarea>
+            <textarea id="input" rows="2" spellcheck="false" placeholder="收一个术语，或粘贴链接…"></textarea>
             <div class="composer-bar">
               <button id="clipChip" class="clip-chip hidden" title="点击填入剪贴板内容"></button>
-              <button id="btnParse" class="btn primary parse-btn">
-                <span>解析</span><svg class="ico sm"><use href="#i-send"></use></svg>
+              <button id="btnParse" class="btn primary parse-btn" aria-label="解析" title="解析（Enter）">
+                <svg class="ico" aria-hidden="true"><use href="#i-send"></use></svg>
               </button>
             </div>
           </div>
@@ -200,7 +199,6 @@
           <div>
             <h2 class="view-title">洞察</h2>
           </div>
-          <span id="statsWeek" class="count-tag">近 7 天</span>
         </div>
         <div id="statsArea" class="stats-area"></div>
       </section>
@@ -210,10 +208,9 @@
           <div>
             <h2 class="view-title">助手</h2>
           </div>
-          <span class="count-tag">本地工具</span>
         </div>
         <div class="agent-area">
-          <p class="agent-intro">让它用工具直接干活：收录术语、改方向、看复习、批量收文章术语、生成周报。它只能操作本机词库，不会删笔记或改 Key。</p>
+          <p class="agent-intro">只操作本机词库，不删笔记、不改 Key。</p>
           <div class="agent-chips" id="agentChips">
             <button data-agent-prompt="今天有哪些词到期？帮我挑 3 个最该复习的">今天复习什么</button>
             <button data-agent-prompt="把最近的剪藏里的术语收进复习">收文章术语</button>
@@ -286,10 +283,10 @@
               <span class="switch-track"></span>
               <span class="switch-label">暂停监听</span>
             </label>
-            <p class="help">默认关闭。只在本机读取剪贴板，点提示才收录。</p>
+            <p class="help">只在本机读取剪贴板，点提示才收录。</p>
             <details class="settings-more">
               <summary>剪贴板说明</summary>
-              <p class="help">开启后只读取像「术语或短语」的内容，在机器人头顶提示；不联网、不记录来源、不上报。Windows SmartScreen 可能误报，介意时保持关闭。</p>
+              <p class="help">只读取像「术语或短语」的内容，不记录来源、不上报。Windows SmartScreen 可能误报，介意时保持关闭。</p>
             </details>
             <div class="field">
               <label for="cfgVideoCookies">视频网站登录</label>
@@ -300,7 +297,7 @@
                 <option value="firefox">Firefox 浏览器</option>
                 <option value="brave">Brave 浏览器</option>
               </select>
-              <p class="help">默认关闭。抓取失败时读取所选浏览器的登录状态重试一次。</p>
+              <p class="help">抓取失败时读取所选浏览器的登录状态重试一次。</p>
               <details class="settings-more">
                 <summary>支持的平台与限制</summary>
                 <p class="help">抖音、TikTok、X 等平台很多视频要登录才能取字幕。Cookie 只在本机被读取，不保存副本、不上传。新版 Edge / Chrome 的加密可能读不到，Firefox 兼容最好。</p>
@@ -340,19 +337,19 @@
                 <input id="trackName" class="track-input" type="text" placeholder="加一个方向，如：医疗器械注册" maxlength="16" spellcheck="false">
                 <button id="btnAddTrack" class="btn ghost sm">添加</button>
               </div>
-              <p class="help">自己定义，数量不限。AI 按当前方向解释。</p>
+              <p class="help">自己定义，数量不限。</p>
             </div>
             <div class="field">
               <label for="cfgReviewDaily">每日复习量（条）</label>
               <input id="cfgReviewDaily" type="number" min="1" max="20">
-              <p class="help">每天最多回顾多少条到期词条。连续比强度重要。</p>
+              <p class="help">每天最多回顾多少条到期词条。</p>
             </div>
             <label class="switch">
               <input type="checkbox" id="cfgRecommend">
               <span class="switch-track"></span>
               <span class="switch-label">显示本地学习建议</span>
             </label>
-            <p class="help">默认关闭。只在本机按复习数据给建议，不联网。</p>
+            <p class="help">按本机复习数据给建议，不联网。</p>
           </section>
 
           <section class="settings-group">
@@ -383,7 +380,7 @@
               <span class="switch-track"></span>
               <span class="switch-label">每满 7 天自动生成周报</span>
             </label>
-            <p class="help">默认关闭。只发送学习数据摘要，不发送原文。</p>
+            <p class="help">只发送学习数据摘要，不发送原文。</p>
             <div class="obs-actions">
               <button id="btnOpenNote" class="link-btn sm">打开笔记</button>
               <button id="btnGetObsidian" class="link-btn sm">没有 Obsidian？去下载</button>
@@ -405,25 +402,10 @@
               <span class="switch-track"></span>
               <span class="switch-label">开机自动启动</span>
             </label>
-            <details class="settings-more">
-              <summary>快捷键</summary>
-              <div class="key-list">
-                <div class="key-row"><kbd>Enter</kbd><span>解析当前输入</span></div>
-                <div class="key-row"><kbd>Shift + Enter</kbd><span>输入框内换行</span></div>
-                <div class="key-row"><kbd>Ctrl + Enter</kbd><span>闪念页：记下当前内容</span></div>
-                <div class="key-row"><kbd>Esc</kbd><span>收起面板</span></div>
-                <div class="key-row"><kbd>Ctrl + Alt + M</kbd><span>全局唤出 / 收起</span></div>
-                <div class="key-row"><kbd>Ctrl + Alt + S</kbd><span>选中文字直接送进秒记</span></div>
-                <div class="key-row"><kbd>空格</kbd><span>回顾中：翻面看答案</span></div>
-                <div class="key-row"><kbd>1 / 2 / 3</kbd><span>回顾中：没想起 / 模糊 / 想起来了</span></div>
-                <div class="key-row"><kbd>1 – 4</kbd><span>AI 考官：选择答案</span></div>
-                <div class="key-row"><kbd>Enter</kbd><span>AI 考官：答完后下一题</span></div>
-              </div>
-            </details>
             <div class="path-box">
               <div class="path-line"><span class="path-key">数据</span><span id="dataDir" class="path-val">—</span><button id="btnDataDir" class="path-open" title="在资源管理器中打开数据目录">打开</button></div>
               <div class="path-line"><span class="path-key">程序</span><span id="installDir" class="path-val">—</span></div>
-              <p class="path-note">程序默认 D:\秒记，数据默认 D:\秒记数据；无 D 盘才回退 C 盘。</p>
+              <p class="path-note">无 D 盘时回退到 C 盘。</p>
             </div>
             <div class="path-box">
               <div class="path-line"><span class="path-key">版本</span><span id="appVersion" class="path-val">—</span><button id="btnCheckUpdate" class="path-open" title="向 GitHub 查询最新版本号">检查更新</button></div>

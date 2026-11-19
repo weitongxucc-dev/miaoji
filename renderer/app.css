@@ -2699,7 +2699,7 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
   position: relative;
   padding: 8px 10px 8px 23px;
   border: 1px solid var(--line-strong);
-  background: var(--surface);
+  background: transparent;
   box-shadow: none;
 }
 .composer:focus-within { border-color: var(--accent); }
@@ -2707,7 +2707,7 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
   content: "›";
   position: absolute;
   left: 9px;
-  top: 11px;
+  top: 12px;
   color: var(--accent);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -2774,9 +2774,43 @@ button, input, textarea, select, .btn, .search, .follow-input, .path-open, .clip
   font-size: var(--text-title);
   color: var(--ink);
 }
+.empty h3.empty-title {
+  max-width: 362px;
+  font-family: var(--font-pixel);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+  background-image: linear-gradient(90deg, #A3571E 0%, #B9452B 52%, #7E4E8C 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.empty-title .hl {
+  font-style: normal;
+  font-weight: inherit;
+  white-space: nowrap;
+  background: none;
+  color: inherit;
+}
+.empty-title.is-typing::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 0.82em;
+  margin-left: 3px;
+  vertical-align: -0.04em;
+  background: var(--accent);
+  animation: type-caret 0.9s steps(2, start) infinite;
+}
+@keyframes type-caret {
+  50% { opacity: 0; }
+}
 .empty p {
   font-family: var(--font-sans);
-  font-size: var(--text-body);
+  font-size: var(--text-secondary);
   line-height: var(--leading-body);
   color: var(--ink-2);
 }
@@ -3597,17 +3631,19 @@ button:focus-visible, [tabindex]:focus-visible {
 .capture-track select {
   max-width: 82px;
   min-width: 0;
+  min-height: 26px;
   padding: 3px 4px;
   border: 1px solid var(--line);
   background: var(--sunken);
-  color: var(--accent-deep);
+  color: var(--ink);
   font-family: var(--font-sans);
   font-size: var(--text-secondary);
   line-height: 1.4;
 }
-.capture-track select:focus { border-color: var(--accent); outline: none; }
+.capture-track select:focus { border-color: var(--accent); }
 .composer-bar .clip-chip { max-width: 110px; }
-.composer-bar .parse-btn { flex: 0 0 auto; white-space: nowrap; }
+.composer-bar .parse-btn { flex: 0 0 auto; width: 32px; height: 32px; padding: 0; }
+.composer-bar .parse-btn .ico { width: 16px; height: 16px; }
 .recent-chip .recent-track { margin-left: 2px; color: var(--faint); font-size: 9.5px; }
 
 /* ---------- 拖动时隐藏气泡；长按俏皮话 ---------- */
@@ -3699,36 +3735,27 @@ body.dragging .bubble { opacity: 0; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 18px;
-  margin: 0 0 3px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
 }
-.composer-track-row .capture-track > span { font-size: 11px; }
+.composer-track-row .capture-track > span { font-size: var(--text-meta); }
 .composer-track-row .capture-track select {
   max-width: 180px;
-  padding: 1px 3px;
+  min-height: 26px;
+  padding: 2px 16px 2px 6px;
   font-size: var(--text-secondary);
 }
 .composer-track-row .capture-track.is-empty select { color: var(--muted); }
-.capture-track-add {
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--accent-deep);
-  font-family: var(--font-sans);
-  font-size: 11px;
-  cursor: pointer;
-}
-.capture-track-add:hover { text-decoration: underline; }
+.composer-track-row .capture-track select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .lib-type-row { display: flex; align-items: center; margin-top: 7px; }
 .lib-type-row .seg { flex: 1 1 auto; margin-top: 0; }
-.lib-filter-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.lib-filter-row { display: flex; align-items: center; gap: var(--space-4); margin-top: 7px; }
 .lib-select {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .lib-select > span {
@@ -3738,16 +3765,18 @@ body.dragging .bubble { opacity: 0; }
   font-size: var(--text-secondary);
 }
 .lib-select select {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  padding: 3px 4px;
+  max-width: 140px;
+  min-height: 26px;
+  padding: 2px 16px 2px 6px;
   border: 1px solid var(--line);
-  background: var(--field);
+  background-color: var(--field);
   color: var(--ink-2);
   font-family: var(--font-sans);
   font-size: var(--text-secondary);
 }
-.lib-select select:focus { border-color: var(--accent); outline: none; }
+.lib-select select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .hot-row { grid-template-columns: minmax(0, 1fr) 14px; }
 .hot-word {
@@ -4237,6 +4266,7 @@ html, body {
 /* 下拉框：去掉系统外观，换成纸面上的细箭头 */
 .field select,
 .lib-select select,
+.note-track-row select,
 .capture-track select {
   appearance: none;
   -webkit-appearance: none;
@@ -4246,6 +4276,40 @@ html, body {
   background-position: right 6px center;
 }
 .capture-track select { padding-right: 16px; background-position: right 4px center; }
+
+/* 闪念页的方向下拉与收录页用同一套控件样式 */
+.note-track-row select {
+  min-height: 26px;
+  padding: 2px 18px 2px 6px;
+  border: 1px solid var(--line);
+  background-color: var(--sunken);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-secondary);
+  line-height: 1.4;
+}
+.note-track-row select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* 点击目标不小于 24px：文字按钮和折叠标题也要点得到 */
+.link-btn,
+.path-open,
+.t-del {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+.range-switch button { min-height: 24px; }
+.chart-table summary {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+}
+.settings-more > summary,
+.track-more > summary { min-height: 24px; }
+.obs-actions .link-btn { min-width: 32px; justify-content: center; }
+.capture-track select:focus:not(:focus-visible),
+.lib-select select:focus:not(:focus-visible),
+.note-track-row select:focus:not(:focus-visible) { outline: none; }
 
 /* 滚动条收细，和纸面同色系 */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

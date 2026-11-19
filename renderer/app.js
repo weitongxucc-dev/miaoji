@@ -27,7 +27,6 @@ const el = {
   btnNoteSave: $('#btnNoteSave'),
   noteAll: $('#noteAll'),
   captureTrack: $('#captureTrack'),
-  captureTrackAdd: $('#captureTrackAdd'),
   clipChip: $('#clipChip'),
   result: $('#result'),
   hotSearch: $('#hotSearch'),
@@ -43,7 +42,6 @@ const el = {
   reviewArea: $('#reviewArea'),
   btnQuiz: $('#btnQuiz'),
   statsArea: $('#statsArea'),
-  statsWeek: $('#statsWeek'),
   agentLog: $('#agentLog'),
   agentInput: $('#agentInput'),
   agentChips: $('#agentChips'),
@@ -272,6 +270,8 @@ const robot = {
   emptyGazeClip: '',
   emptyBody: null,
   emptyImg: null,
+  emptyTyped: false,
+  emptyTypeTimer: 0,
   avatarMode: 'idle',
   avatarHoldTimer: 0,
   avatarClipTimer: 0,
@@ -493,6 +493,7 @@ function stopEmptyRobot() {
   clearInterval(robot.emptyWildTimer);
   clearTimeout(robot.emptyFrenzyTimer);
   clearInterval(robot.emptyFrenzyFaceTimer);
+  clearEmptyTypeTimer();
   robot.emptyIdleTimer = 0;
   robot.emptyClipTimer = 0;
   robot.emptyWildTimer = 0;
@@ -920,11 +921,11 @@ function renderStats() {
   el.headStat.textContent = s.total === 0
     ? '今天还没收录'
     : s.today === 0
-      ? `今天还没收录 · 累计 ${s.total}`
-      : `今天 ${s.today} · 累计 ${s.total}`;
+      ? `今天还没收录，累计 ${s.total}`
+      : `今天 ${s.today}，累计 ${s.total}`;
   // 回顾页头部的差距统计跟全站状态走，复习打完分立即反映
   if (el.reviewStats) {
-    el.reviewStats.innerHTML = `已收 <b>${s.total}</b> · 复习过 <b>${s.reviewedWords}</b> · 稳固 <b>${s.stable}</b>`;
+    el.reviewStats.innerHTML = `已收 <b>${s.total}</b>，复习过 <b>${s.reviewedWords}</b>，稳固 <b>${s.stable}</b>`;
   }
 
   // 气泡：有到期复习时优先提醒「回顾 N」，机器人成为复习信使
@@ -1017,7 +1018,7 @@ function basicsZone(e) {
     }
     if (e.key_words && e.key_words.length) {
       body += `<div class="sec-label"><span>用法</span><b>${pad2(e.key_words.length)}</b></div>
-        <ul class="kw-list">${e.key_words.map((k) => `<li><b>${esc(k.word)}</b>${k.meaning ? ' · ' + esc(k.meaning) : ''}</li>`).join('')}</ul>`;
+        <ul class="kw-list">${e.key_words.map((k) => `<li><b>${esc(k.word)}</b>${k.meaning ? '，' + esc(k.meaning) : ''}</li>`).join('')}</ul>`;
     }
     if (e.note) {
       body += `<p class="note-line"><span>${richInline(e.note)}</span></p>`;
@@ -1229,14 +1230,14 @@ function dossierHTML(e) {
   const meta = [];
   meta.push(kindTagHTML(e));
   if (e.source && e.source.type === 'video') {
-    const bits = ['🎬'];
+    const bits = [];
     if (e.source.author) bits.push(esc(e.source.author));
     if (e.source.durationSeconds) {
       const n = Math.round(Number(e.source.durationSeconds) || 0);
       bits.push(`${Math.floor(n / 60)}分${String(n % 60).padStart(2, '0')}秒`);
     }
     if (e.source.transcriptSource) bits.push(esc(e.source.transcriptSource));
-    meta.push(`<span class="src-tag">${bits.join(' · ')}</span>`);
+    meta.push(`<span class="src-tag">${bits.join('、')}</span>`);
   }
   if (e.source && e.source.site && isClip) meta.push(`<span class="src-tag">${esc(e.source.site)}</span>`);
   if (e.phonetic) meta.push(`<span class="phon">${esc(e.phonetic)}</span>`);
@@ -1378,6 +1379,7 @@ function lookupAltZone(e) {
 function renderEmpty() {
   document.body.classList.remove('result-view');
   el.composerWrap.classList.remove('hidden');
+  clearEmptyTypeTimer();
 
   const recent = Object.values(state.entries)
     .sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt))
@@ -1388,20 +1390,84 @@ function renderEmpty() {
     <div class="empty-bot-body" id="emptyBotBody">
       <img id="emptyBotImg" class="empty-bot" src="assets/robot-idle.png" alt="">
     </div>
-    <h3>${needKey ? '先填一个 API Key' : '进入一个新领域，从收下第一个术语开始'}</h3>
+    <h3 class="${needKey ? '' : 'empty-title'}">${needKey ? '先填一个 API Key' : '<span class="type-seg">进入</span><em class="hl">新领域</em><span class="type-seg">，从记下第一条</span><em class="hl">术语</em><span class="type-seg">开始。</span>'}</h3>
     <p>${needKey
-      ? '秒记用 DeepSeek 按当前方向解释术语，Key 只存在你这台电脑上。'
-      : '术语、单词、句子、链接都行；随手想记的去「闪念」页。解析结果按当前方向解释，并排进复习。'}</p>
+      ? '秒记用 DeepSeek 按领域解释术语，Key 只存在你这台电脑上。'
+      : '收下后会按领域解释，到期再回来。'}</p>
     ${needKey
       ? `<div class="recent-row"><button class="recent-chip warn" data-settings>去设置 API Key</button></div>`
       : ''}
     ${recent.length ? `<div class="recent-row"><span class="recent-label">最近</span>${recent.map((e) => {
       const tn = trackNameOf(e.track);
       return `
-      <button class="recent-chip" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? ' · ' + esc(tn) : ''}">${esc(truncate(e.word, 18))}${tn ? ` <span class="recent-track">${esc(tn)}</span>` : ''}</button>`;
+      <button class="recent-chip" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? '（' + esc(tn) + '）' : ''}">${esc(truncate(e.word, 18))}${tn ? ` <span class="recent-track">${esc(tn)}</span>` : ''}</button>`;
     }).join('')}</div>` : ''}
   </div>`;
+  const titleEl = el.result.querySelector('.empty-title');
+  if (titleEl) {
+    if (reducedMotion.matches) {
+      robot.emptyTyped = true;
+    } else if (!robot.emptyTyped) {
+      robot.emptyTyped = true;
+      runEmptyTyping(titleEl);
+    } else {
+      scheduleEmptyTypeLoop(titleEl);
+    }
+  }
   startEmptyRobot();
+}
+
+// 空态标题打字机：60 秒一轮循环重播；系统开启「减弱动态效果」时直接显示全文
+const EMPTY_TYPE_LOOP_MS = 60000;
+
+function clearEmptyTypeTimer() {
+  clearTimeout(robot.emptyTypeTimer);
+  robot.emptyTypeTimer = 0;
+}
+
+function scheduleEmptyTypeLoop(h3) {
+  clearEmptyTypeTimer();
+  if (!h3 || reducedMotion.matches) return;
+  robot.emptyTypeTimer = setTimeout(() => {
+    // 窗口不可见时暂停，回到前台再接着排。
+    if (!h3.isConnected || document.visibilityState === 'hidden') {
+      scheduleEmptyTypeLoop(h3);
+      return;
+    }
+    runEmptyTyping(h3);
+  }, EMPTY_TYPE_LOOP_MS);
+}
+
+function runEmptyTyping(h3) {
+  const segs = [...h3.querySelectorAll('.type-seg, .hl')];
+  if (!segs.length) return;
+  segs.forEach((s) => {
+    if (s.dataset.full === undefined) s.dataset.full = s.textContent;
+  });
+  const full = segs.map((s) => s.dataset.full);
+  segs.forEach((s) => { s.textContent = ''; });
+  h3.classList.add('is-typing');
+  let si = 0;
+  let ci = 0;
+  const tick = () => {
+    if (!h3.isConnected) {
+      clearEmptyTypeTimer();
+      return;
+    }
+    if (si >= segs.length) {
+      h3.classList.remove('is-typing');
+      scheduleEmptyTypeLoop(h3);
+      return;
+    }
+    ci += 1;
+    segs[si].textContent = full[si].slice(0, ci);
+    if (ci >= full[si].length) {
+      si += 1;
+      ci = 0;
+    }
+    setTimeout(tick, 70);
+  };
+  setTimeout(tick, 220);
 }
 
 function renderLoading(text) {
@@ -1506,6 +1572,8 @@ function hotItemHTML(e) {
   const mastered = e.mastered ? ' mastered' : '';
   const tn = trackNameOf(e.track);
   const isLong = info.group !== 'term' && e.kind !== 'word';
+  // 类型筛选本身已经限定了类型；「词句」下才需要区分词条和句子
+  const showKind = state.typeFilter === 'words';
   const bits = [];
   if (tn) bits.push(`<span class="hot-track">${esc(tn)}</span>`);
   if (e.kind === 'clip') {
@@ -1519,10 +1587,10 @@ function hotItemHTML(e) {
   const threadDot = Array.isArray(e.thread) && e.thread.length
     ? '<span class="thread-dot" title="有追问"></span>'
     : '';
-  return `<button class="hot-row${isLong ? ' is-long' : ''}${mastered}" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? ' · ' + esc(tn) : ''}">
+  return `<button class="hot-row${isLong ? ' is-long' : ''}${mastered}" data-key="${encodeURIComponent(e.key)}" title="${esc(e.word)}${tn ? '（' + esc(tn) + '）' : ''}">
     <span class="hot-main">
       <span class="hot-word-line">
-        <span class="lib-kind">${esc(info.label)}</span>
+        ${showKind ? `<span class="lib-kind">${esc(info.label)}</span>` : ''}
         <span class="hot-word${e.kind === 'word' ? ' is-word' : ''}">${esc(e.word)}</span>
       </span>
       <span class="hot-meaning">${esc(meaning)}</span>
@@ -1609,14 +1677,13 @@ function renderCaptureTrack() {
   const tracks = state.config?.tracks || [];
   const current = tracks.some((t) => t.id === state.captureTrack) ? state.captureTrack : '';
   state.captureTrack = current;
-  el.captureTrack.disabled = !tracks.length;
-  el.captureTrack.innerHTML = tracks.length
-    ? ['<option value="">自动判断</option>', ...tracks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`)].join('')
-    : '<option value="">未设方向</option>';
+  // 方向在设置里管理；没设方向时收录页不显示这一行，默认按内容自动判断
+  const row = el.captureTrack.closest('.composer-track-row');
+  if (row) row.classList.toggle('hidden', !tracks.length);
+  el.captureTrack.innerHTML = ['<option value="">自动判断</option>', ...tracks.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`)].join('');
   el.captureTrack.value = current;
-  if (el.captureTrackAdd) el.captureTrackAdd.classList.toggle('hidden', tracks.length > 0);
   const wrap = el.captureTrack.closest('.capture-track');
-  if (wrap) wrap.classList.toggle('is-empty', !tracks.length);
+  if (wrap) wrap.classList.toggle('is-empty', !current);
 }
 
 function renderAll() {
@@ -1654,7 +1721,7 @@ function fmtDayLabel(iso) {
 
 function noteStatus(e) {
   if (state.noteOrganizing[e.key]) return { text: '整理中', cls: 'is-organizing' };
-  if (state.noteErrors[e.key]) return { text: '整理失败 · 重试', cls: 'is-error' };
+  if (state.noteErrors[e.key]) return { text: '整理失败，重试', cls: 'is-error' };
   if ((e.key_points && e.key_points.length) || e.summary) return { text: '已整理', cls: 'is-organized' };
   return { text: '未整理', cls: 'is-plain' };
 }
@@ -1663,9 +1730,9 @@ function renderNoteView() {
   if (!el.noteList) return;
   const notes = noteEntries();
   if (el.noteCount) el.noteCount.textContent = notes.length + ' 条';
-  // 方向下拉：保留当前选择；「未指定方向」排在最前
+  // 方向下拉：保留当前选择；「未设方向」排在最前
   const prev = state.noteTrack;
-  const options = ['<option value="">未指定方向</option>']
+  const options = ['<option value="">未设方向</option>']
     .concat((state.config?.tracks || []).map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`))
     .join('');
   el.noteTrack.innerHTML = options;
@@ -1741,7 +1808,7 @@ function noteRowHTML(e) {
     <div class="note-body">
       <p class="note-snip">${esc(truncate(snippet, 72))}</p>
       <p class="note-sub">
-        <span class="note-track-name">${esc(track || '未指定方向')}</span>
+        <span class="note-track-name">${esc(track || '未设方向')}</span>
         ${statusHTML}
       </p>
       ${detail}
@@ -1842,19 +1909,18 @@ function renderReview() {
       <div class="review-empty-title">${done ? '今天的回顾完成了' : '今天没有到期的词条'}</div>
       <div class="review-empty-sub">${
         next
-          ? `下一个到期：${esc(truncate(next.word, 24))} · ${fmtShort(next.nextReviewAt)}`
+          ? `下一个到期：${esc(truncate(next.word, 24))}（${fmtShort(next.nextReviewAt)}）`
           : '查一个词，明天它就会回到这里等你'
-      }<br>记住的秘诀不是多看，是先想再翻。</div>
+      }</div>
     </div>`;
     return;
   }
 
   el.reviewArea.innerHTML = `<div class="review-done">
     <div class="review-empty-title">${list.length} 条待回顾</div>
-    <div class="review-empty-sub">按今天的额度，这次回顾 ${list.length} 条。<br>先想它的意思，再翻面。</div>
-    ${backlog > 0 ? `<p class="review-backlog">另有 ${backlog} 条已到期，积压会越滚越大。今天可以一次清完。</p>` : ''}
-    <button class="review-flip-btn" data-review-start>开始回顾${backlog > 0 ? '（按额度）' : ''}</button>
-    ${backlog > 0 ? `<button class="btn ghost sm review-all-btn" data-review-all>清积压 · 全部 ${due.length} 条</button>` : ''}
+    <div class="review-empty-sub">先想它的意思，再翻面。</div>
+    <button class="review-flip-btn" data-review-start>开始回顾</button>
+    ${backlog > 0 ? `<button class="btn ghost sm review-all-btn" data-review-all>清积压（全部 ${due.length} 条）</button>` : ''}
   </div>`;
 }
 
@@ -1893,7 +1959,7 @@ function renderReviewCard() {
   if (!session.flipped) {
     // 快捷键提示只在本轮第一张卡出现，之后只留一句短提示（已确认线框）
     const hint = session.idx === 0
-      ? `先想一下它的意思，再翻面。<br>按 <kbd>空格</kbd> 或点下面的按钮。`
+      ? '先想一下它的意思，再翻面。<br>快捷键：<kbd>空格</kbd>'
       : '先回忆，再翻面。';
     el.reviewArea.innerHTML = `<div class="review-card">
       <div class="review-progress">${progress}</div>
@@ -1916,7 +1982,7 @@ function renderReviewCard() {
       ${memory ? `<div class="review-extra"><span class="lbl">${entry.kind === 'term' ? '为什么重要' : '记忆'}</span><br>${esc(truncate(memory, 120))}</div>` : ''}
       <div class="grade-row">${REVIEW_GRADES.map((g) => `
         <button class="grade-btn g${g.g}" data-review-grade="${g.g}">
-          ${g.label}<small>${g.key} · ${g.hint}</small>
+          ${g.label}<small><kbd>${g.key}</kbd> ${g.hint}</small>
         </button>`).join('')}
       </div>
     </div>
@@ -1961,8 +2027,9 @@ function renderReviewSummary() {
       : '';
     el.reviewArea.innerHTML = `<div class="review-done">
       <div class="review-done-title">这次回顾了 ${grades.length} 条词条</div>
-      <div class="review-done-sub">想起来了 ${good} · 需要加强 ${weak + grades.filter((g) => g.grade === 1).length}<br>
-        ${weak ? '没想起的词条明天会再回来。' : '明天它还会来找你。'}</div>
+      <div class="review-done-sub">想起来了 ${good}，需要加强 ${weak + grades.filter((g) => g.grade === 1).length}。${
+        weak ? '没想起的词条明天会再出现。' : ''
+      }</div>
       ${tip}
     </div>`;
   }
@@ -2083,7 +2150,7 @@ function renderQuizCard() {
   if (qz.idx >= qz.questions.length) return renderQuizSummary();
 
   const q = qz.questions[qz.idx];
-  const progress = `考官 · ${qz.idx + 1}/${qz.questions.length}`;
+  const progress = `AI 考官 ${qz.idx + 1}/${qz.questions.length}`;
   let options = q.options.map((opt, i) => {
     let cls = 'quiz-option';
     if (qz.revealed) {
@@ -2156,7 +2223,7 @@ function renderQuizSummary() {
     ? `<div class="review-tip">建议：明天先把 ${forgot.slice(0, 2).map((w) => `<b>${esc(w)}</b>`).join('、')} 过一遍。</div>`
     : '';
   el.reviewArea.innerHTML = `<div class="review-done quiz-done">
-    <div class="review-done-title">考官结果 · ${right}/${answers.length}</div>
+    <div class="review-done-title">答对 ${right}/${answers.length}</div>
     <div class="review-done-sub">答对的进入下一复习阶段，答错的明天回来。</div>
     ${tip}
     <div class="quiz-result-list">${rows || '<p class="review-empty-sub">这一轮没有作答。</p>'}</div>
@@ -2188,7 +2255,7 @@ function statsHTML(d) {
     const showLabel = showEvery === 1 || i === 0 || i === d.days.length - 1 || (d.days.length - 1 - i) % showEvery === 0;
     return `
     <div class="chart-day${showLabel ? '' : ' no-label'}" tabindex="0" aria-label="${esc(x.date)} 新增 ${x.added}，复习 ${x.reviewed}">
-      <span class="chart-tip">${esc(x.date)} · 新增 ${x.added} · 复习 ${x.reviewed}</span>
+      <span class="chart-tip">${esc(x.date)}，新增 ${x.added}，复习 ${x.reviewed}</span>
       <div class="chart-bars">
         <span class="chart-bar added" style="height:${chartBarHeight(x.added, max)}%"></span>
         <span class="chart-bar reviewed" style="height:${chartBarHeight(x.reviewed, max)}%"></span>
@@ -2236,22 +2303,16 @@ function statsHTML(d) {
       ? `<p class="stats-anchor">还没有领域记录。收下第一个术语，它就会按方向归到这里。</p>
          <div class="stats-anchor-action"><button class="btn ghost sm" data-suggest-action="jot">去收录术语</button></div>`
       : `<p class="stats-anchor">${esc(rangeLabel)}${d.tracks.length ? `在 <b>${d.tracks.length}</b> 个领域` : ''}收了 <b>${d.rangeAdded}</b> 条术语</p>`}
-    <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : `复习 <b>${d.rangeReviewed}</b> 次 · ${d.streak ? `连续 <b>${d.streak}</b> 天` : '今天还没开始'}`}</p>
-    <div class="stats-hero">
-      <div class="stat-tile"><b>${d.total}</b><span>收录</span></div>
-      <div class="stat-tile"><b>${d.stats.reviewedWords}</b><span>复习过</span></div>
-      <div class="stat-tile"><b>${d.stats.stable}</b><span>稳固</span></div>
-      <div class="stat-tile${d.due ? ' is-due' : ''}"><b>${d.due}</b><span>到期</span></div>
-    </div>
+    <p class="stats-streak">${d.total === 0 ? '还没有学习记录' : `复习 <b>${d.rangeReviewed}</b> 次，${d.streak ? `连续 <b>${d.streak}</b> 天` : '今天还没开始'}`}</p>
 
     <div class="stat-block">
       <div class="stat-block-head"><span>领域覆盖</span><b>${d.tracks.length}</b></div>
       ${tracks}
-      ${d.noTrack ? `<p class="stats-note">另有 ${d.noTrack} 条未归方向。</p>` : ''}
+      ${d.noTrack && d.tracks.length ? `<p class="stats-note">另有 ${d.noTrack} 条未归方向。</p>` : ''}
     </div>
 
     <div class="chart-card">
-      <div class="chart-head"><span class="chart-title">${esc(rangeLabel)}</span>${legend}</div>
+      <div class="chart-head"><span class="chart-title">每天新增与复习</span>${legend}</div>
       <div class="chart-plot${d.days.length > 14 ? ' dense' : ''}">${days}</div>
       ${!d.rangeAdded && !d.rangeReviewed ? `<p class="stats-note">${esc(rangeLabel)}还没有新增或复习记录。</p>` : ''}
       <details class="chart-table"><summary>看数字</summary>
@@ -2297,7 +2358,6 @@ async function renderStatsView() {
     }
     state.statsData = r;
     el.statsArea.innerHTML = statsHTML(r);
-    if (el.statsWeek) el.statsWeek.textContent = r.rangeLabel || '近 7 天';
   } catch (err) {
     el.statsArea.innerHTML = `<div class="review-empty"><div class="review-empty-title">读不到统计</div><div class="review-empty-sub">${esc(err && err.message ? err.message : err)}</div></div>`;
   }
@@ -2472,7 +2532,7 @@ async function parse(text, force) {
     }
 
     if (res.obsidian && res.obsidian.ok) {
-      toast(res.isNew ? '新词已记入 Obsidian' : `已累计到第 ${res.count} 次 · 笔记已更新`);
+      toast(res.isNew ? '新词已记入 Obsidian' : `已累计到第 ${res.count} 次，笔记已更新`);
     } else {
       toast('已记录在本机，但写入 Obsidian 失败：' + (res.obsidian?.error || '未知错误'), 'warn');
     }
@@ -2757,7 +2817,7 @@ function renderObsDetect() {
   const d = state.obsDetect || { installed: false, vaults: [] };
   const vaults = Array.isArray(d.vaults) ? d.vaults : [];
   el.obsStatus.textContent = d.installed
-    ? `已检测到 Obsidian${vaults.length ? ` · ${vaults.length} 个库` : '（还没有库）'}`
+    ? `已检测到 Obsidian${vaults.length ? `（${vaults.length} 个库）` : '（还没有库）'}`
     : '未检测到 Obsidian';
   el.obsStatus.classList.toggle('warn', !d.installed);
   el.btnGetObsidian.classList.toggle('hidden', Boolean(d.installed));
@@ -2922,7 +2982,7 @@ function renderTrackList() {
       : '';
     const othersHTML = others.length
       ? `<details class="track-more">
-          <summary>其他方向 · ${others.length}</summary>
+          <summary>其他方向（${others.length}）</summary>
           ${others.map(rowHTML).join('')}
         </details>`
       : '';
@@ -3378,13 +3438,6 @@ function bind() {
     el.captureTrack.addEventListener('change', () => {
       state.captureTrack = el.captureTrack.value || '';
       el.input.focus();
-    });
-  }
-
-  if (el.captureTrackAdd) {
-    el.captureTrackAdd.addEventListener('click', () => {
-      switchTab('settings');
-      setTimeout(() => el.trackName?.focus(), 60);
     });
   }
 
