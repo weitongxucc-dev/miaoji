@@ -148,6 +148,24 @@ function scheduleSavePetPos() {
   }, 500);
 }
 
+// 展开态拖动面板后，把悬浮球位置同步到面板右下角，收起时不会跳回原处
+let lastProgrammaticBounds = null;
+
+function setWindowBounds(bounds) {
+  lastProgrammaticBounds = { x: bounds.x, y: bounds.y };
+  win.setBounds(bounds, false);
+}
+
+function syncPetWithPanel() {
+  if (!win || !expanded) return;
+  const b = win.getBounds();
+  if (lastProgrammaticBounds && b.x === lastProgrammaticBounds.x && b.y === lastProgrammaticBounds.y) return;
+  const next = clampPet({ x: b.x + PANEL_W - PET_W, y: b.y + PANEL_H - PET_H });
+  if (next.x === petPos.x && next.y === petPos.y) return;
+  petPos = next;
+  scheduleSavePetPos();
+}
+
 function createWindow() {
   const conf = store.loadConfig();
   petPos = clampPet(conf.ballPos && Number.isFinite(conf.ballPos.x) ? conf.ballPos : defaultPos());
@@ -219,6 +237,9 @@ function createWindow() {
     if (win && !win.isDestroyed()) win.webContents.send('ui:focus');
   });
 
+  // 用户在页头 / 页脚 / 空状态空白处拖动后，同步悬浮球位置
+  win.on('move', syncPetWithPanel);
+
   win.on('closed', () => {
     win = null;
   });
@@ -243,7 +264,7 @@ function expand() {
   if (y + PANEL_H > wa.y + wa.height - 8) y = wa.y + wa.height - PANEL_H - 8;
 
   expanded = true;
-  win.setBounds({ x, y, width: PANEL_W, height: PANEL_H }, false);
+  setWindowBounds({ x, y, width: PANEL_W, height: PANEL_H });
   win.show();
   win.focus();
   win.webContents.send('ui:expanded');
@@ -252,7 +273,7 @@ function expand() {
 function collapse() {
   if (!win || !expanded) return;
   expanded = false;
-  win.setBounds({ x: petPos.x, y: petPos.y, width: PET_W, height: PET_H }, false);
+  setWindowBounds({ x: petPos.x, y: petPos.y, width: PET_W, height: PET_H });
   win.webContents.send('ui:collapsed');
   win.blur();
 }

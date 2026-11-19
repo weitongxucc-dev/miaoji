@@ -47,6 +47,23 @@ button:focus-visible, [tabindex]:focus-visible {
 .ico { width: 16px; height: 16px; display: block; flex: 0 0 auto; fill: currentColor; }
 .ico.sm { width: 13px; height: 13px; }
 
+/* ---------------- 窗口拖动 ----------------
+   页头、页脚、空状态的空白处都可以拖动窗口；
+   按钮、输入框、机器人、可点文字保持 no-drag，保证点击与划选正常。 */
+.panel-head,
+.panel-foot,
+.empty {
+  -webkit-app-region: drag;
+}
+.panel-head .brand,
+.panel-head .head-actions button,
+.panel-foot button,
+.empty button,
+.empty .empty-bot-body,
+.empty a {
+  -webkit-app-region: no-drag;
+}
+
 /* ---------------- 悬浮机器人 ---------------- */
 
 #pet {
